@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Archive, ArchiveRestore, Copy, Download, FileSpreadsheet, PackagePlus, Pencil, SearchX, Upload } from 'lucide-react';
+import { Archive, ArchiveRestore, Copy, Download, FileSpreadsheet, PackagePlus, Pencil, SearchX, Trash2, Upload } from 'lucide-react';
 import { useMediaMap } from '@/components/media/MediaPicker';
 import { Button, ButtonLink } from '@/components/ui/Button';
 import { DataTable, type Column } from '@/components/ui/DataTable';
@@ -78,6 +78,24 @@ export default function ProductsPage() {
       setSelected(new Set());
       refresh();
       toast(`${res.updated.length} updated${res.failed.length ? `, ${res.failed.length} could not be changed` : ''}.`, res.failed.length ? 'info' : 'success');
+    } catch (e) {
+      toast(errorMessage(e), 'error');
+    }
+  };
+
+  const deleteAll = async () => {
+    const ok = await confirmAction({
+      title: 'Delete ALL products?',
+      body: 'This permanently deletes every product, variant, option, image reference and spec. This cannot be undone.',
+      confirmLabel: 'Delete All',
+      tone: 'danger',
+    });
+    if (!ok) return;
+    try {
+      await productService.deleteAll();
+      setSelected(new Set());
+      refresh();
+      toast('All products deleted.', 'success');
     } catch (e) {
       toast(errorMessage(e), 'error');
     }
@@ -217,6 +235,13 @@ export default function ProductsPage() {
                 </Button>
               </>
             )}
+            <Button
+              variant="danger"
+              icon={<Trash2 className="h-4 w-4" aria-hidden />}
+              onClick={() => void deleteAll()}
+            >
+              Delete All
+            </Button>
             <ButtonLink to="/products/new" variant="primary" icon={<PackagePlus className="h-4 w-4" aria-hidden />}>
               Add product
             </ButtonLink>

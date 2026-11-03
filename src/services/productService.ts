@@ -170,6 +170,15 @@ export const productService = {
     });
   },
 
+  deleteAll(): Promise<{ ok: boolean }> {
+    if (API_MODE) return productsApi.deleteAllProducts();
+    return mockRequest(() => {
+      db.products = [];
+      db.adjustments = [];
+      return { ok: true };
+    });
+  },
+
   /** Bulk status change. Activation re-validates each product; failures are reported, not thrown. */
   setStatus(ids: string[], status: ProductStatus): Promise<{ updated: string[]; failed: Array<{ id: string; name: string; reason: string }> }> {
     if (API_MODE) {

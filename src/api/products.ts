@@ -62,6 +62,11 @@ export function exportProductsExcel(): void {
     });
 }
 
+/** Delete every product and all related data (variants, options, images, specs). */
+export function deleteAllProducts(): Promise<{ ok: boolean }> {
+  return apiClient.delete<{ ok: boolean }>('/api/admin/products/all');
+}
+
 export interface ImportResult { imported: number; categories: number; variants: number; }
 
 /** Upload xlsx file and bulk-import products. */
