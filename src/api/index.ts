@@ -1,0 +1,25 @@
+// Single entry point for the admin's API layer.
+export { apiClient, setUnauthorizedHandler, type RequestOptions } from './client';
+export { API_BASE_URL, API_MODE, API_TIMEOUT_MS, API_UPLOAD_TIMEOUT_MS, apiModeLabel, mediaUrl } from './config';
+export * as authApi from './auth';
+export * as productsApi from './products';
+export * as categoriesApi from './categories';
+export * as mediaApi from './media';
+export * as inventoryApi from './inventory';
+export * as settingsApi from './settings';
+export * as contentApi from './content';
+export * as ordersApi from './orders';
+export * as couponsApi from './coupons';
+export * as customersApi from './customers';
+export * as dashboardApi from './dashboard';
+export * as navLinksApi from './navLinks';
+export * as collectionsApi from './collections';
+export type { AdminNavLink, NavLinkInput } from './navLinks';
+export type { AdminCollection, AdminCollectionCircle, AdminCollectionSection, CollectionInput } from './collections';
+export type * from './types';
+export * as reviewsApi from './reviews';
+export * as returnsApi from './returns';
+export type { AdminReturn, AdminReturnList, AdminReturnQuery, ReturnEvent as AdminReturnEvent, ReturnRefund as AdminReturnRefund } from './returns';
+export type { AdminReview, AdminReviewList, AdminReviewQuery, ReviewStatus } from './reviews';
+export * as translationsApi from './translations';
+export type { ContentLang, TranslationList, TranslationRow } from './translations';
