@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Archive, ArchiveRestore, Copy, PackagePlus, Pencil, SearchX } from 'lucide-react';
+import { Archive, ArchiveRestore, Copy, Download, PackagePlus, Pencil, SearchX, Upload } from 'lucide-react';
 import { useMediaMap } from '@/components/media/MediaPicker';
 import { Button, ButtonLink } from '@/components/ui/Button';
 import { DataTable, type Column } from '@/components/ui/DataTable';
@@ -15,6 +15,8 @@ import { invalidate, useQuery } from '@/hooks/useQuery';
 import { errorMessage } from '@/services/api';
 import { categoryService } from '@/services/catalogServices';
 import { productService } from '@/services/productService';
+import { exportProductsExcel, importProductsExcel } from '@/api/products';
+import { API_MODE } from '@/api/config';
 import { confirmAction, toast } from '@/store';
 import type { Product, ProductStatus } from '@/types';
 import { formatDate } from '@/utils/dates';
@@ -32,6 +34,24 @@ export default function ProductsPage() {
   const { map: media } = useMediaMap();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkFailures, setBulkFailures] = useState<Array<{ name: string; reason: string }>>([]);
+  const [importing, setImporting] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+    setImporting(true);
+    try {
+      const result = await importProductsExcel(file);
+      refresh();
+      toast(`Imported ${result.imported} products, ${result.variants} variants.`, 'success');
+    } catch (err) {
+      toast(errorMessage(err), 'error');
+    } finally {
+      setImporting(false);
+    }
+  };
   const threshold = settings?.store.lowStockThreshold ?? 5;
   const catName = useMemo(() => new Map((categories ?? []).map((c) => [c.id, c.name.en])), [categories]);
 
@@ -168,9 +188,31 @@ export default function ProductsPage() {
       <PageHeader
         description="Prices are stored in USD, the base currency. The storefront converts them for shoppers."
         actions={
-          <ButtonLink to="/products/new" variant="primary" icon={<PackagePlus className="h-4 w-4" aria-hidden />}>
-            Add product
-          </ButtonLink>
+          <div className="flex items-center gap-2">
+            {API_MODE && (
+              <>
+                <input ref={fileInputRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={handleImport} />
+                <Button
+                  variant="ghost"
+                  icon={<Upload className="h-4 w-4" aria-hidden />}
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={importing}
+                >
+                  {importing ? 'Importing…' : 'Import Excel'}
+                </Button>
+                <Button
+                  variant="ghost"
+                  icon={<Download className="h-4 w-4" aria-hidden />}
+                  onClick={exportProductsExcel}
+                >
+                  Export Excel
+                </Button>
+              </>
+            )}
+            <ButtonLink to="/products/new" variant="primary" icon={<PackagePlus className="h-4 w-4" aria-hidden />}>
+              Add product
+            </ButtonLink>
+          </div>
         }
       />
       {bulkFailures.length > 0 && (

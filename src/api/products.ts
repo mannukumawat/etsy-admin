@@ -1,6 +1,7 @@
 import type { Product, ProductStatus } from '@/types';
 import type { ProductInput } from '@/types';
 import { apiClient } from './client';
+import { API_BASE_URL } from './config';
 import type { AdminProductListParams, ProductListResponse, StatusRequest } from './types';
 
 // Owner-only product endpoints. Every call carries the session cookie via the central client.
@@ -25,4 +26,33 @@ export function updateProduct(id: string, input: ProductInput, status: ProductSt
 /** Publish / unpublish / archive. The server re-checks the publish rules. */
 export function updateProductStatus(id: string, status: ProductStatus): Promise<Product> {
   return apiClient.patch<Product>(`/api/admin/products/${encodeURIComponent(id)}/status`, { status } satisfies StatusRequest);
+}
+
+/** Trigger Excel download — opens the export URL directly in the browser tab. */
+export function exportProductsExcel(): void {
+  const csrfMatch = document.cookie.match(/(?:^|; )ys_csrf=([^;]*)/);
+  const csrf = csrfMatch ? decodeURIComponent(csrfMatch[1]) : '';
+  // GET export: no CSRF needed, open as download
+  const url = `${API_BASE_URL}/api/admin/products/export`;
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'products-export.xlsx';
+  // Pass CSRF via query for GET (server reads header, so we use fetch + blob instead)
+  void fetch(url, { credentials: 'include', headers: csrf ? { 'x-csrf-token': csrf } : {} })
+    .then((r) => r.blob())
+    .then((blob) => {
+      const blobUrl = URL.createObjectURL(blob);
+      a.href = blobUrl;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 5000);
+    });
+}
+
+export interface ImportResult { imported: number; categories: number; variants: number; }
+
+/** Upload xlsx file and bulk-import products. */
+export async function importProductsExcel(file: File): Promise<ImportResult> {
+  const fd = new FormData();
+  fd.append('file', file);
+  return apiClient.post<ImportResult>('/api/admin/products/import', fd);
 }
