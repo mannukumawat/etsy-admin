@@ -178,20 +178,6 @@ function Topbar({ onOpenNav }: { onOpenNav: () => void }) {
           ]}
         />
       </div>
-      <div className="flex items-center gap-2 border-t border-brand-100 bg-brand-50 px-4 py-1.5 text-xs text-brand-900 sm:px-6 lg:px-8" role="note">
-        <FlaskConical className="h-3.5 w-3.5 shrink-0" aria-hidden />
-        <span>
-          {API_MODE ? (
-            <>
-              <strong>Live API</strong> — every change is saved to the store database via {API_BASE_URL} and appears on the storefront.
-            </>
-          ) : (
-            <>
-              <strong>Demo mode</strong> — changes stay in this admin preview and reset on refresh. The storefront is not updated.
-            </>
-          )}
-        </span>
-      </div>
     </header>
   );
 }
