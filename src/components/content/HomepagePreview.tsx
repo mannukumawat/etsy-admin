@@ -119,9 +119,13 @@ export function HomepagePreview({ open, onClose, values: v, categories, products
           <Img asset={v.hero.imageId ? media.get(v.hero.imageId) : undefined} className="aspect-[16/10] w-full rounded-xl" />
         </section>
 
-        {/* Featured collections */}
-        <section className="border-t border-sand-200 px-4 py-6 sm:px-8" aria-label="Featured collections">
-          <SectionLabel>Featured collections</SectionLabel>
+        {productGrid('Featured items (first row, up to 12)', v.featuredProductIds)}
+        {productGrid('New arrivals (second row, up to 8)', v.newArrivalProductIds)}
+        {productGrid('Bestsellers (third row, up to 8)', v.bestsellerProductIds)}
+
+        {/* Homepage categories */}
+        <section className="border-t border-sand-200 px-4 py-6 sm:px-8" aria-label="Homepage categories">
+          <SectionLabel>Homepage categories (below product rows)</SectionLabel>
           {v.featuredCategoryIds.length === 0 ? (
             <p className="text-[13px] text-ink-muted">No categories chosen.</p>
           ) : (
@@ -140,10 +144,6 @@ export function HomepagePreview({ open, onClose, values: v, categories, products
             </ul>
           )}
         </section>
-
-        {productGrid('Featured products', v.featuredProductIds)}
-        {productGrid('Bestsellers', v.bestsellerProductIds)}
-        {productGrid('New arrivals', v.newArrivalProductIds)}
 
         {/* Brand story */}
         <section className="grid items-center gap-6 border-t border-sand-200 bg-white px-4 py-8 sm:px-8 md:grid-cols-2" aria-label="Brand story">

@@ -42,8 +42,8 @@ const schema = z
     hero: z.object({ title: localized(true, 120), subtitle: localized(false, 300), imageId: z.string().nullable(), ctaLabel: localized(true, 40), ctaHref: link('/shop') }),
     featuredCategoryIds: z.array(z.string()),
     featuredProductIds: productIds,
-    bestsellerProductIds: productIds,
-    newArrivalProductIds: productIds,
+    bestsellerProductIds: z.array(z.string()).max(8, 'Choose at most 8 products.'),
+    newArrivalProductIds: z.array(z.string()).max(8, 'Choose at most 8 products.'),
     story: z.object({ title: localized(true, 120), body: localized(false, 2000), imageId: z.string().nullable(), ctaLabel: localized(false, 40), ctaHref: link('/about') }),
     newsletter: z.object({ title: localized(true, 120), body: localized(false, 400) }),
   })
@@ -54,10 +54,10 @@ const schema = z
 type Values = z.infer<typeof schema>;
 
 type ProductListName = 'featuredProductIds' | 'bestsellerProductIds' | 'newArrivalProductIds';
-const PRODUCT_LISTS: Array<{ name: ProductListName; title: string; description: string }> = [
-  { name: 'featuredProductIds', title: 'Featured products', description: 'Hand-picked products in the main homepage grid.' },
-  { name: 'bestsellerProductIds', title: 'Bestsellers', description: 'Shown in the “Bestsellers” row.' },
-  { name: 'newArrivalProductIds', title: 'New arrivals', description: 'Shown in the “New arrivals” row.' },
+const PRODUCT_LISTS: Array<{ name: ProductListName; title: string; description: string; maxItems: number }> = [
+  { name: 'featuredProductIds', title: 'Featured items', description: 'First product row on the homepage, directly below the hero.', maxItems: 12 },
+  { name: 'newArrivalProductIds', title: 'New arrivals', description: 'Second product row on the homepage.', maxItems: 8 },
+  { name: 'bestsellerProductIds', title: 'Bestsellers', description: 'Third product row on the homepage.', maxItems: 8 },
 ];
 
 function HomepageEditor({ doc: loadedDoc }: { doc: Versioned<HomepageContent> }) {
@@ -250,7 +250,30 @@ function HomepageEditor({ doc: loadedDoc }: { doc: Versioned<HomepageContent> })
             </div>
           </Card>
 
-          <Card title="Featured collections" description="Category circles below the hero, in this order.">
+          {PRODUCT_LISTS.map((list) => (
+            <Card key={list.name} title={list.title} description={`${list.description} Choose up to ${list.maxItems} products; only active products can be published.`}>
+              <Controller
+                control={control}
+                name={list.name}
+                render={({ field }) => (
+                  <ProductListEditor
+                    label={list.title}
+                    value={field.value}
+                    onChange={(ids) => {
+                      field.onChange(ids);
+                      clearErrors(list.name);
+                    }}
+                    products={products}
+                    media={media}
+                    error={errors[list.name]?.message}
+                    max={list.maxItems}
+                  />
+                )}
+              />
+            </Card>
+          ))}
+
+          <Card title="Homepage categories" description="Category shortcuts shown below all three product rows. These group products; choose products above to control homepage items.">
             <Controller
               control={control}
               name="featuredCategoryIds"
@@ -268,28 +291,6 @@ function HomepageEditor({ doc: loadedDoc }: { doc: Versioned<HomepageContent> })
               )}
             />
           </Card>
-
-          {PRODUCT_LISTS.map((list) => (
-            <Card key={list.name} title={list.title} description={`${list.description} Up to ${HOMEPAGE_LIST_MAX} products; only active products can be published.`}>
-              <Controller
-                control={control}
-                name={list.name}
-                render={({ field }) => (
-                  <ProductListEditor
-                    label={list.title}
-                    value={field.value}
-                    onChange={(ids) => {
-                      field.onChange(ids);
-                      clearErrors(list.name);
-                    }}
-                    products={products}
-                    media={media}
-                    error={errors[list.name]?.message}
-                  />
-                )}
-              />
-            </Card>
-          ))}
 
           <Card title="Brand story" description="The “about the studio” block further down the homepage.">
             <div className="space-y-4">
