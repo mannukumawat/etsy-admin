@@ -28,6 +28,20 @@ export function updateProductStatus(id: string, status: ProductStatus): Promise<
   return apiClient.patch<Product>(`/api/admin/products/${encodeURIComponent(id)}/status`, { status } satisfies StatusRequest);
 }
 
+/** Download blank import template Excel. */
+export function downloadImportTemplate(): void {
+  const url = `${API_BASE_URL}/api/admin/products/template`;
+  void fetch(url, { credentials: 'include' })
+    .then((r) => r.blob())
+    .then((blob) => {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'product-import-template.xlsx';
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    });
+}
+
 /** Trigger Excel download — opens the export URL directly in the browser tab. */
 export function exportProductsExcel(): void {
   const csrfMatch = document.cookie.match(/(?:^|; )ys_csrf=([^;]*)/);

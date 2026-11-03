@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Archive, ArchiveRestore, Copy, Download, PackagePlus, Pencil, SearchX, Upload } from 'lucide-react';
+import { Archive, ArchiveRestore, Copy, Download, FileSpreadsheet, PackagePlus, Pencil, SearchX, Upload } from 'lucide-react';
 import { useMediaMap } from '@/components/media/MediaPicker';
 import { Button, ButtonLink } from '@/components/ui/Button';
 import { DataTable, type Column } from '@/components/ui/DataTable';
@@ -15,7 +15,7 @@ import { invalidate, useQuery } from '@/hooks/useQuery';
 import { errorMessage } from '@/services/api';
 import { categoryService } from '@/services/catalogServices';
 import { productService } from '@/services/productService';
-import { exportProductsExcel, importProductsExcel } from '@/api/products';
+import { downloadImportTemplate, exportProductsExcel, importProductsExcel } from '@/api/products';
 import { API_MODE } from '@/api/config';
 import { confirmAction, toast } from '@/store';
 import type { Product, ProductStatus } from '@/types';
@@ -192,6 +192,14 @@ export default function ProductsPage() {
             {API_MODE && (
               <>
                 <input ref={fileInputRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={handleImport} />
+                <Button
+                  variant="ghost"
+                  icon={<FileSpreadsheet className="h-4 w-4" aria-hidden />}
+                  onClick={downloadImportTemplate}
+                  title="Download blank Excel template with sample data and instructions"
+                >
+                  Download Template
+                </Button>
                 <Button
                   variant="ghost"
                   icon={<Upload className="h-4 w-4" aria-hidden />}
