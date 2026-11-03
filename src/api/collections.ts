@@ -24,6 +24,7 @@ export interface AdminCollection {
   heroColor: string;
   status: 'draft' | 'published';
   displayOrder: number;
+  showInNavigation: boolean;
   publishedAt: string | null;
   circles: AdminCollectionCircle[];
   sections: AdminCollectionSection[];
@@ -39,6 +40,7 @@ export interface CollectionInput {
   heroImageId: string | null;
   heroColor: string;
   displayOrder: number;
+  showInNavigation: boolean;
   circles: Array<{ labelEn: string; imageId: string | null; linkType: 'category' | 'collection' | 'url'; linkValue: string }>;
   sections: Array<{ titleEn: string; productIds: string[] }>;
 }

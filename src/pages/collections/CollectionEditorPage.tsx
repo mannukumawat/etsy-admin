@@ -7,7 +7,7 @@ import { ArrowLeft, Plus, Trash2 } from 'lucide-react';
 import { ImageField, useMediaMap } from '@/components/media/MediaPicker';
 import { Button, ButtonLink } from '@/components/ui/Button';
 import { ErrorState, Notice, Skeleton } from '@/components/ui/Feedback';
-import { SelectField, TextField } from '@/components/ui/Form';
+import { SelectField, Switch, TextField } from '@/components/ui/Form';
 import { ContentLangProvider, LocalizedField } from '@/components/ui/LocalizedField';
 import { PageHeader } from '@/components/ui/Page';
 import { ProductListEditor } from '@/components/content/ProductListEditor';
@@ -42,6 +42,7 @@ const schema = z.object({
   heroImageId: z.string().nullable(),
   heroColor: z.string().trim().regex(/^#[0-9a-fA-F]{6}$/, 'Use a hex colour like #F5ECE1.'),
   displayOrder: z.number().int().min(0),
+  showInNavigation: z.boolean(),
   circles: z.array(circleSchema).max(12),
   sections: z.array(sectionSchema).min(1, 'Add at least one product section.').max(10),
 });
@@ -55,6 +56,7 @@ const emptyValues: Values = {
   heroImageId: null,
   heroColor: '#F5ECE1',
   displayOrder: 0,
+  showInNavigation: false,
   circles: [],
   sections: [{ title: { en: '' }, productIds: [] }],
 };
@@ -68,6 +70,7 @@ function toValues(c: AdminCollection): Values {
     heroImageId: c.heroImageId,
     heroColor: c.heroColor,
     displayOrder: c.displayOrder,
+    showInNavigation: c.showInNavigation,
     circles: c.circles.map((ci: AdminCollection['circles'][number]) => ({ label: ci.label, imageId: ci.imageId, linkType: ci.linkType, linkValue: ci.linkValue })),
     sections: c.sections.map((s: AdminCollection['sections'][number]) => ({ title: s.title, productIds: s.productIds })),
   };
@@ -110,6 +113,7 @@ export default function CollectionEditorPage() {
       heroImageId: v.heroImageId,
       heroColor: v.heroColor,
       displayOrder: v.displayOrder,
+      showInNavigation: v.showInNavigation,
       circles: v.circles.map((c) => ({ labelEn: c.label.en, imageId: c.imageId, linkType: c.linkType, linkValue: c.linkValue })),
       sections: v.sections.map((s) => ({ titleEn: s.title.en, productIds: s.productIds })),
     };
@@ -166,6 +170,18 @@ export default function CollectionEditorPage() {
             <LocalizedField name="description" label="Description" multiline rows={4} maxLength={2000} />
             <Controller control={control} name="heroImageId" render={({ field }) => <ImageField label="Hero image" value={field.value} onChange={field.onChange} aspect="wide" hint="Optional — shown behind the title." />} />
             <TextField id="col-color" label="Hero background colour" hint="Hex colour, e.g. #F5ECE1" error={formState.errors.heroColor?.message} {...register('heroColor')} />
+            <Controller
+              control={control}
+              name="showInNavigation"
+              render={({ field }) => (
+                <Switch
+                  label="Show in storefront navigation"
+                  description="Published collections appear in the top navigation and mobile menu, ordered by display order."
+                  checked={field.value}
+                  onChange={field.onChange}
+                />
+              )}
+            />
           </section>
 
           <section className="card space-y-4 p-5">
