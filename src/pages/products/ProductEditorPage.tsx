@@ -16,6 +16,7 @@ import { usePageMeta, useSettings } from '@/hooks/misc';
 import { invalidate, useQuery } from '@/hooks/useQuery';
 import { ApiError, errorMessage } from '@/services/api';
 import { categoryService } from '@/services/catalogServices';
+import { mediaService } from '@/services/contentServices';
 import { productService } from '@/services/productService';
 import { confirmAction, toast } from '@/store';
 import type { Product, ProductInput, ProductStatus } from '@/types';
