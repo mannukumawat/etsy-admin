@@ -44,6 +44,8 @@ const schema = z
     featuredProductIds: productIds,
     bestsellerProductIds: z.array(z.string()).max(8, 'Choose at most 8 products.'),
     newArrivalProductIds: z.array(z.string()).max(8, 'Choose at most 8 products.'),
+    itemsProductIds: productIds,
+    transferProductIds: productIds,
     story: z.object({ title: localized(true, 120), body: localized(false, 2000), imageId: z.string().nullable(), ctaLabel: localized(false, 40), ctaHref: link('/about') }),
     newsletter: z.object({ title: localized(true, 120), body: localized(false, 400) }),
   })
@@ -53,11 +55,13 @@ const schema = z
   });
 type Values = z.infer<typeof schema>;
 
-type ProductListName = 'featuredProductIds' | 'bestsellerProductIds' | 'newArrivalProductIds';
+type ProductListName = 'featuredProductIds' | 'bestsellerProductIds' | 'newArrivalProductIds' | 'itemsProductIds' | 'transferProductIds';
 const PRODUCT_LISTS: Array<{ name: ProductListName; title: string; description: string; maxItems: number }> = [
   { name: 'featuredProductIds', title: 'Featured items', description: 'First product row on the homepage, directly below the hero.', maxItems: 12 },
   { name: 'newArrivalProductIds', title: 'New arrivals', description: 'Second product row on the homepage.', maxItems: 8 },
   { name: 'bestsellerProductIds', title: 'Bestsellers', description: 'Third product row on the homepage.', maxItems: 8 },
+  { name: 'itemsProductIds', title: 'Items', description: 'Fourth product row on the homepage.', maxItems: 12 },
+  { name: 'transferProductIds', title: 'Transfer', description: 'Fifth product row on the homepage.', maxItems: 12 },
 ];
 
 function HomepageEditor({ doc: loadedDoc }: { doc: Versioned<HomepageContent> }) {
@@ -66,7 +70,14 @@ function HomepageEditor({ doc: loadedDoc }: { doc: Versioned<HomepageContent> })
     setDoc(loadedDoc);
   }, [loadedDoc]);
 
-  const form = useForm<Values>({ resolver: zodResolver(schema), defaultValues: loadedDoc.draft });
+  const form = useForm<Values>({
+    resolver: zodResolver(schema),
+    defaultValues: {
+      ...loadedDoc.draft,
+      itemsProductIds: loadedDoc.draft.itemsProductIds ?? [],
+      transferProductIds: loadedDoc.draft.transferProductIds ?? [],
+    },
+  });
   const {
     register,
     control,
@@ -94,7 +105,11 @@ function HomepageEditor({ doc: loadedDoc }: { doc: Versioned<HomepageContent> })
 
   const applySaved = (next: Versioned<HomepageContent>) => {
     setDoc(next);
-    reset(next.draft);
+    reset({
+      ...next.draft,
+      itemsProductIds: next.draft.itemsProductIds ?? [],
+      transferProductIds: next.draft.transferProductIds ?? [],
+    });
     invalidate('homepage', 'translation', 'media');
   };
 

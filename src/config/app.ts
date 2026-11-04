@@ -48,6 +48,7 @@ export const NAV: NavGroup[] = [
     items: [
       { to: '/products', label: 'Products', icon: Package },
       { to: '/categories', label: 'Categories', icon: FolderTree },
+      { to: '/item-groups', label: 'Item Groups', icon: Layers },
       { to: '/inventory', label: 'Inventory', icon: Boxes },
       { to: '/media', label: 'Media', icon: Image },
     ],

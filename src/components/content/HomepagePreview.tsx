@@ -122,6 +122,8 @@ export function HomepagePreview({ open, onClose, values: v, categories, products
         {productGrid('Featured items (first row, up to 12)', v.featuredProductIds)}
         {productGrid('New arrivals (second row, up to 8)', v.newArrivalProductIds)}
         {productGrid('Bestsellers (third row, up to 8)', v.bestsellerProductIds)}
+        {productGrid('Items (fourth row, up to 12)', v.itemsProductIds ?? [])}
+        {productGrid('Transfer (fifth row, up to 12)', v.transferProductIds ?? [])}
 
         {/* Homepage categories */}
         <section className="border-t border-sand-200 px-4 py-6 sm:px-8" aria-label="Homepage categories">

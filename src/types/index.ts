@@ -63,6 +63,19 @@ export interface CategoryWithCount extends Category {
   productCount: number;
 }
 
+export interface ItemGroup {
+  id: string;
+  nameEn: string;
+  nameHi: string;
+  slug: string;
+  position: number;
+  isActive: boolean;
+  imageId: string | null;
+  productCount?: number;
+  createdAt: ISODate;
+  updatedAt: ISODate;
+}
+
 export type ProductStatus = 'draft' | 'active' | 'archived';
 
 export interface ProductImage {
@@ -114,6 +127,8 @@ export interface Product {
   shortDescription: Localized;
   description: Localized;
   categoryId: string;
+  itemGroupId?: string | null;
+  navLinkId?: string | null;
   tags: string[];
   /** Default price for new variants (USD minor units). */
   basePrice: Minor;
@@ -431,6 +446,8 @@ export interface HomepageContent {
   featuredProductIds: string[];
   bestsellerProductIds: string[];
   newArrivalProductIds: string[];
+  itemsProductIds: string[];
+  transferProductIds: string[];
   story: { title: Localized; body: Localized; imageId: string | null; ctaLabel: Localized; ctaHref: string };
   newsletter: { title: Localized; body: Localized };
 }

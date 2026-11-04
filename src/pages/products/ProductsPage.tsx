@@ -16,6 +16,7 @@ import { errorMessage } from '@/services/api';
 import { categoryService } from '@/services/catalogServices';
 import { productService } from '@/services/productService';
 import { downloadImportTemplate, exportProductsExcel, importProductsExcel } from '@/api/products';
+import { itemGroupsApi } from '@/api';
 import { API_MODE } from '@/api/config';
 import { confirmAction, toast } from '@/store';
 import type { Product, ProductStatus } from '@/types';
@@ -27,9 +28,11 @@ import { priceRange, totalStock } from '@/utils/productRules';
 export default function ProductsPage() {
   usePageMeta('Products', [{ label: 'Catalog' }]);
   const navigate = useNavigate();
-  const list = useListParams(['status', 'category', 'stock', 'flag'], { sort: 'updated', dir: 'desc' });
+  const list = useListParams(['status', 'category', 'stock', 'flag', 'itemGroup'], { sort: 'updated', dir: 'desc' });
   const { data, isLoading, isFetching, error, refetch } = useQuery(`products:list:${list.key}`, () => productService.list(list.query), { keepPrevious: true });
   const { data: categories } = useQuery('categories', () => categoryService.list());
+  const { data: itemGroups } = useQuery('item-groups', () => itemGroupsApi.fetchItemGroups());
+  const activeItemGroup = list.query.filters?.itemGroup ? itemGroups?.find((g) => g.id === list.query.filters?.itemGroup) : undefined;
   const { data: settings } = useSettings();
   const { map: media } = useMediaMap();
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -248,6 +251,12 @@ export default function ProductsPage() {
           </div>
         }
       />
+      {activeItemGroup && (
+        <Notice tone="info" className="mb-4">
+          Showing products in item group: <strong>{activeItemGroup.nameEn}</strong>
+          <Button size="xs" variant="ghost" className="ml-3" onClick={() => list.update({ itemGroup: null })}>Clear filter</Button>
+        </Notice>
+      )}
       {bulkFailures.length > 0 && (
         <Notice tone="warning" className="mb-4" title="Some products were not changed" action={<Button size="xs" variant="ghost" onClick={() => setBulkFailures([])}>Dismiss</Button>}>
           <ul className="list-disc pl-4">

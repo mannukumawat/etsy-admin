@@ -13,6 +13,7 @@ export * as couponsApi from './coupons';
 export * as customersApi from './customers';
 export * as dashboardApi from './dashboard';
 export * as navLinksApi from './navLinks';
+export * as itemGroupsApi from './itemGroups';
 export * as collectionsApi from './collections';
 export type { AdminNavLink, NavLinkInput } from './navLinks';
 export type { AdminCollection, AdminCollectionCircle, AdminCollectionSection, CollectionInput } from './collections';

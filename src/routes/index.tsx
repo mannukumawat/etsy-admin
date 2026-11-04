@@ -9,6 +9,7 @@ const DashboardPage = lazy(() => import('@/pages/DashboardPage'));
 const ProductsPage = lazy(() => import('@/pages/products/ProductsPage'));
 const ProductEditorPage = lazy(() => import('@/pages/products/ProductEditorPage'));
 const CategoriesPage = lazy(() => import('@/pages/CategoriesPage'));
+const ItemGroupsPage = lazy(() => import('@/pages/ItemGroupsPage'));
 const InventoryPage = lazy(() => import('@/pages/InventoryPage'));
 const OrdersPage = lazy(() => import('@/pages/orders/OrdersPage'));
 const OrderDetailPage = lazy(() => import('@/pages/orders/OrderDetailPage'));
@@ -55,6 +56,7 @@ export const router = createBrowserRouter([
       { path: '/products/new', element: <ProductEditorPage /> },
       { path: '/products/:id/edit', element: <ProductEditorPage /> },
       { path: '/categories', element: <CategoriesPage /> },
+      { path: '/item-groups', element: <ItemGroupsPage /> },
       { path: '/inventory', element: <InventoryPage /> },
       { path: '/orders', element: <OrdersPage /> },
       { path: '/orders/:id', element: <OrderDetailPage /> },

@@ -77,6 +77,7 @@ function listConfig(threshold: number): ListConfig<Product> {
         return v === 'out' ? states.includes('out') : v === 'low' ? states.includes('low') : states.every((s) => s === 'in');
       },
       flag: (p, v) => (v === 'featured' ? p.isFeatured : v === 'bestseller' ? p.isBestseller : v === 'new' ? p.isNew : true),
+      itemGroup: (p, v) => p.itemGroupId === v,
     },
     defaultSort: 'updated',
     defaultDir: 'desc',

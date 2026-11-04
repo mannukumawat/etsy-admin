@@ -16,6 +16,7 @@ import { usePageMeta, useSettings } from '@/hooks/misc';
 import { invalidate, useQuery } from '@/hooks/useQuery';
 import { ApiError, errorMessage } from '@/services/api';
 import { categoryService } from '@/services/catalogServices';
+import { itemGroupsApi, navLinksApi } from '@/api';
 import { mediaService } from '@/services/contentServices';
 import { productService } from '@/services/productService';
 import { confirmAction, toast } from '@/store';
@@ -43,6 +44,8 @@ const schema = z.object({
   care: localized(false, 1000),
   slug: z.string().trim().regex(SLUG_RE, 'Use lowercase letters, numbers and single hyphens.'),
   categoryId: z.string().min(1, 'Choose a category.'),
+  itemGroupId: z.string().nullable().optional(),
+  navLinkId: z.string().nullable().optional(),
   tagsText: z.string().max(700),
   basePrice: money,
   baseSalePrice: optionalMoney,
@@ -91,7 +94,7 @@ const L = () => ({ en: '' });
 function blankForm(): ProductForm {
   return {
     name: L(), shortDescription: L(), description: L(), materials: L(), care: L(),
-    slug: '', categoryId: '', tagsText: '', basePrice: 0, baseSalePrice: null, images: [], options: [],
+    slug: '', categoryId: '', itemGroupId: null, navLinkId: null, tagsText: '', basePrice: 0, baseSalePrice: null, images: [], options: [],
     variants: [{ id: newId('var'), sku: '', options: {}, price: 0, salePrice: null, stock: 0, imageIds: [], isNew: true }],
     weight: { value: null, unit: 'g' }, dimensions: { length: null, width: null, height: null, unit: 'cm' }, specs: [],
     returnsAllowed: true, exchangeAllowed: true, returnDays: 30,
@@ -102,7 +105,7 @@ function blankForm(): ProductForm {
 function toForm(p: Product): ProductForm {
   return {
     name: p.name, shortDescription: p.shortDescription, description: p.description, materials: p.materials, care: p.care,
-    slug: p.slug, categoryId: p.categoryId, tagsText: p.tags.join(', '),
+    slug: p.slug, categoryId: p.categoryId, itemGroupId: p.itemGroupId ?? null, navLinkId: p.navLinkId ?? null, tagsText: p.tags.join(', '),
     basePrice: toMajor(p.basePrice), baseSalePrice: p.baseSalePrice === null ? null : toMajor(p.baseSalePrice),
     images: p.images, options: p.options,
     variants: p.variants.map((v) => ({ ...v, price: toMajor(v.price), salePrice: v.salePrice === null ? null : toMajor(v.salePrice), isNew: false })),
@@ -115,7 +118,7 @@ function toForm(p: Product): ProductForm {
 function fromForm(v: ProductForm): ProductInput {
   return {
     name: v.name, shortDescription: v.shortDescription, description: v.description, materials: v.materials, care: v.care,
-    slug: v.slug.trim(), categoryId: v.categoryId,
+    slug: v.slug.trim(), categoryId: v.categoryId, itemGroupId: v.itemGroupId ?? null, navLinkId: v.navLinkId ?? null,
     tags: v.tagsText.split(',').map((t) => t.trim()).filter(Boolean),
     basePrice: toMinor(v.basePrice), baseSalePrice: v.baseSalePrice === null ? null : toMinor(v.baseSalePrice),
     images: v.images, options: v.options,
@@ -524,6 +527,8 @@ function Editor({ product }: { product: Product | null }) {
   const navigate = useNavigate();
   const idRef = useRef(product?.id ?? newId('new'));
   const { data: categories } = useQuery('categories', () => categoryService.list());
+  const { data: itemGroups } = useQuery('item-groups', () => itemGroupsApi.fetchItemGroups());
+  const { data: navLinks } = useQuery('nav-links', () => navLinksApi.fetchNavLinks());
   const { data: all } = useQuery('products:all', () => productService.all());
   const form = useForm<ProductForm>({ resolver: zodResolver(schema), defaultValues: product ? toForm(product) : blankForm(), mode: 'onSubmit' });
   const { register, handleSubmit, setError, setValue, control, formState, reset, getValues } = form;
@@ -665,6 +670,18 @@ function Editor({ product }: { product: Product | null }) {
                         {c.name.en}
                         {c.isActive ? '' : ' (inactive)'}
                       </option>
+                    ))}
+                  </SelectField>
+                  <SelectField id="item-group" label="Item Group" error={formState.errors.itemGroupId?.message} {...register('itemGroupId')}>
+                    <option value="">None</option>
+                    {(itemGroups ?? []).filter((g) => g.isActive).map((g) => (
+                      <option key={g.id} value={g.id}>{g.nameEn}</option>
+                    ))}
+                  </SelectField>
+                  <SelectField id="nav-link" label="Nav Link" error={formState.errors.navLinkId?.message} {...register('navLinkId')}>
+                    <option value="">None</option>
+                    {(navLinks ?? []).filter((l) => l.isActive).map((l) => (
+                      <option key={l.id} value={l.id}>{l.label.en} ({l.href})</option>
                     ))}
                   </SelectField>
                   <TextareaField id="tags" label="Tags" rows={2} hint="Comma separated, used for search." error={formState.errors.tagsText?.message} {...register('tagsText')} />
