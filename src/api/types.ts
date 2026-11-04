@@ -15,6 +15,7 @@ export type MediaListResponse = ListEnvelope<MediaAsset>;
 /** `POST /api/admin/auth/login` and `GET /api/admin/auth/me` */
 export interface OwnerResponse {
   owner: AdminUser;
+  csrfToken: string;
 }
 
 export interface LoginRequest {

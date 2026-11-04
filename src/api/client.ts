@@ -35,6 +35,11 @@ const CODES: Record<string, ApiError['code']> = {
 type UnauthorizedHandler = () => void;
 let onUnauthorized: UnauthorizedHandler | null = null;
 let handlingUnauthorized = false;
+let sessionCsrfToken: string | null = null;
+
+export function setCsrfToken(token: string | null) {
+  sessionCsrfToken = token;
+}
 
 /**
  * Registered once by the app shell. Called when the server rejects a request because the session is
@@ -91,7 +96,7 @@ async function request<T>(method: string, path: string, options: RequestOptions 
   const timer = timeoutMs > 0 ? setTimeout(() => controller.abort(), timeoutMs) : null;
   // The backend double-submits this cookie as a header on every mutating request from a signed-in
   // owner session (see backend/src/csrf.ts) — a no-op before login has issued the csrf cookie.
-  const csrfToken = MUTATING_METHODS.has(method) ? readCookie(CSRF_COOKIE) : null;
+  const csrfToken = MUTATING_METHODS.has(method) ? (sessionCsrfToken ?? readCookie(CSRF_COOKIE)) : null;
 
   let response: Response;
   try {
