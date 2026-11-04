@@ -231,6 +231,24 @@ export const mediaService = {
     }, [300, 700]);
   },
 
+  async importUrl(url: string, alt: Localized = { en: '' }): Promise<MediaAsset> {
+    if (API_MODE) return mediaApi.importMediaUrl(url, alt);
+    const dimensions = await new Promise<{ width: number; height: number }>((resolve, reject) => {
+      const image = new Image();
+      image.onload = () => resolve({ width: image.naturalWidth, height: image.naturalHeight });
+      image.onerror = () => reject(new ApiError('validation', 'That URL could not be loaded as an image.'));
+      image.src = url;
+    });
+    const pathName = new URL(url).pathname;
+    const asset: MediaAsset = {
+      id: newId('m'), url, fileName: decodeURIComponent(pathName.split('/').pop() || 'remote-image'),
+      mimeType: 'image/remote', sizeBytes: 0, width: dimensions.width, height: dimensions.height,
+      alt, source: 'upload', createdAt: nowIso(),
+    };
+    db.media.unshift(asset);
+    return asset;
+  },
+
   updateAlt(id: string, alt: Localized): Promise<MediaAsset> {
     return mockRequest(() => {
       const m = db.media.find((x) => x.id === id);

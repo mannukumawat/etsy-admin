@@ -15,6 +15,10 @@ export function uploadMedia(body: MediaUploadRequest): Promise<MediaAsset> {
   return apiClient.post<MediaAsset>('/api/admin/media', body);
 }
 
+export function importMediaUrl(url: string, alt: Localized): Promise<MediaAsset> {
+  return apiClient.post<MediaAsset>('/api/admin/media/from-url', { url, alt });
+}
+
 /**
  * Multipart upload, ready for when the endpoint accepts it. The client deliberately does not set
  * Content-Type for FormData so the browser can add its own multipart boundary.

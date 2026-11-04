@@ -158,6 +158,9 @@ function ImagesSection() {
   const { fields, append, remove, move } = useFieldArray({ control, name: 'images', keyName: 'key' });
   const { map } = useMediaMap();
   const [picking, setPicking] = useState(false);
+  const [imageUrl, setImageUrl] = useState('');
+  const [urlBusy, setUrlBusy] = useState(false);
+  const [urlError, setUrlError] = useState('');
   const variants = useWatch({ control, name: 'variants' });
   return (
     <Card
@@ -169,6 +172,43 @@ function ImagesSection() {
         </Button>
       }
     >
+      <div className="mb-4 rounded-lg border border-sand-200 bg-ivory-50 p-3">
+        <div className="flex flex-col items-end gap-2 sm:flex-row">
+          <TextField
+            label="Add image from URL"
+            type="url"
+            value={imageUrl}
+            onChange={(event) => { setImageUrl(event.target.value); setUrlError(''); }}
+            placeholder="https://example.com/product-image.jpg"
+            error={urlError}
+            containerClassName="w-full flex-1"
+          />
+          <Button
+            type="button"
+            variant="outline"
+            loading={urlBusy}
+            disabled={!imageUrl.trim()}
+            onClick={async () => {
+              setUrlBusy(true);
+              setUrlError('');
+              try {
+                const asset = await mediaService.importUrl(imageUrl.trim());
+                invalidate('media');
+                append({ mediaId: asset.id, alt: asset.alt });
+                setImageUrl('');
+                toast('Image URL added to this product.', 'success');
+              } catch (error) {
+                setUrlError(errorMessage(error));
+              } finally {
+                setUrlBusy(false);
+              }
+            }}
+          >
+            Add URL
+          </Button>
+        </div>
+        <p className="mt-1 text-xs text-ink-muted">Paste a direct public URL to a JPEG, PNG, WebP or GIF image.</p>
+      </div>
       {fields.length === 0 ? (
         <EmptyState icon={<ImagePlus className="h-6 w-6" aria-hidden />} title="No images yet" body="Active products need at least one image." className="py-6" />
       ) : (
