@@ -70,7 +70,8 @@ const schema = z.object({
         isNew: z.boolean(),
       }),
     )
-    .min(1, 'At least one variant is required.'),
+    .min(1, 'At least one variant is required.')
+    .max(250, 'A product can have at most 250 variants. Reduce the number of option values.'),
   weight: z.object({ value: dim, unit: z.enum(['g', 'kg']) }),
   dimensions: z.object({ length: dim, width: dim, height: dim, unit: z.enum(['cm', 'in']) }),
   specs: z.array(z.object({ id: z.string(), label: localized(true, 40), value: localized(true, 80) })),
