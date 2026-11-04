@@ -139,6 +139,9 @@ export default function NavLinksPage() {
                   </div>
                   <p className="truncate text-xs text-ink-muted">{n.href}</p>
                 </div>
+                <span className="hidden text-[13px] text-ink-soft sm:block">
+                  {n.productCount} product{n.productCount === 1 ? '' : 's'}
+                </span>
                 <Menu
                   label={`Actions for ${n.label.en}`}
                   items={[

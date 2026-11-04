@@ -6,6 +6,7 @@ export interface AdminNavLink {
   href: string;
   position: number;
   isActive: boolean;
+  productCount: number;
 }
 
 export interface NavLinkInput {
