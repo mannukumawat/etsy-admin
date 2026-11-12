@@ -3,7 +3,7 @@ import { Controller, FormProvider, useFieldArray, useForm, useFormContext, useWa
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Link } from 'react-router-dom';
 import { z } from 'zod';
-import { Globe, MapPin, Plus, Trash2, Truck } from 'lucide-react';
+import { Globe, Info, MapPin, Pencil, Plus, Trash2, Truck, X } from 'lucide-react';
 import { SearchableChecklist, type ChecklistItem } from '@/components/settings/Choices';
 import { countryName, countryOptions } from '@/components/settings/countryNames';
 import { CurrencyExamples, onInvalidForm, SettingsActionBar, SettingsGate, SettingsScopeNotice, useUnsavedChangesGuard } from '@/components/settings/SettingsKit';
@@ -109,9 +109,11 @@ const deliveryWindow = (handling: StoreSettings['handlingDays'], m: { minDays: n
   return min === max ? pluralize(min, 'business day') : `${min}–${max} business days`;
 };
 
+const fieldErrorMessage = (e: unknown) => (e as { message?: string } | undefined)?.message;
+
 // ---------------------------------------------------------------------------------------------
 
-function MethodBlock({ index, method, currencies }: { index: number; method: (typeof METHODS)[number]; currencies: CurrencyConfig[] }) {
+function MethodBlock({ index, method, currencies, handling }: { index: number; method: (typeof METHODS)[number]; currencies: CurrencyConfig[]; handling: StoreSettings['handlingDays'] }) {
   const {
     register,
     control,
@@ -132,7 +134,8 @@ function MethodBlock({ index, method, currencies }: { index: number; method: (ty
       <FieldError message={err?.enabled?.message} />
       <div className="mt-3 grid gap-3 sm:grid-cols-3">
         <TextField
-          label="Rate"
+          label="Charge to customer"
+          hint="Shipping fee. Enter 0 for free shipping."
           prefix="USD"
           type="number"
           inputMode="decimal"
@@ -142,7 +145,8 @@ function MethodBlock({ index, method, currencies }: { index: number; method: (ty
           {...register(`zones.${index}.${method.key}.rate`, { setValueAs: num })}
         />
         <TextField
-          label="Transit, min"
+          label="Delivery takes, from"
+          hint="Courier transit time."
           type="number"
           inputMode="numeric"
           min={0}
@@ -153,7 +157,8 @@ function MethodBlock({ index, method, currencies }: { index: number; method: (ty
           {...register(`zones.${index}.${method.key}.minDays`, { setValueAs: num })}
         />
         <TextField
-          label="Transit, max"
+          label="Delivery takes, up to"
+          hint="Slowest case."
           type="number"
           inputMode="numeric"
           min={0}
@@ -165,11 +170,16 @@ function MethodBlock({ index, method, currencies }: { index: number; method: (ty
         />
       </div>
       {enabled && value && <CurrencyExamples usd={toMinor(value.rate)} currencies={currencies} className="mt-2" />}
+      {enabled && value && Number.isFinite(value.rate) && Number.isFinite(value.minDays) && Number.isFinite(value.maxDays) && (
+        <p className="mt-3 rounded-md bg-sand-100 px-2.5 py-1.5 text-xs text-ink-soft">
+          Customer sees: <strong className="text-ink">{method.label}</strong> · {value.rate === 0 ? 'Free' : formatUsd(toMinor(value.rate))} · arrives in {deliveryWindow(handling, value)}
+        </p>
+      )}
     </div>
   );
 }
 
-function ZoneCard({ index, zoneCount, currencies, onRemove }: { index: number; zoneCount: number; currencies: CurrencyConfig[]; onRemove: () => void }) {
+function ZoneCard({ index, zoneCount, currencies, handling, onRemove }: { index: number; zoneCount: number; currencies: CurrencyConfig[]; handling: StoreSettings['handlingDays']; onRemove: () => void }) {
   const {
     register,
     control,
@@ -182,6 +192,13 @@ function ZoneCard({ index, zoneCount, currencies, onRemove }: { index: number; z
   const zoneErrors = errors.zones?.[index];
   const name = zones?.[index]?.name;
   const countries = zones?.[index]?.countries ?? [];
+  const [editing, setEditing] = useState(countries.length === 0);
+  const countriesError = fieldErrorMessage(zoneErrors?.countries);
+  const showList = editing || !!countriesError;
+  const removeCountry = (code: string) =>
+    setValue(`zones.${index}.countries`, (getValues(`zones.${index}.countries`) ?? []).filter((c) => c !== code), { shouldDirty: true, shouldValidate: true });
+  const summarize = (m: Values['zones'][number]['standard'] | undefined, label: string) =>
+    m?.enabled && Number.isFinite(m.rate) ? `${label} ${m.rate === 0 ? 'free' : formatUsd(toMinor(m.rate))}` : `${label} off`;
 
   const moveHere = (code: string, from: number) => {
     setValue(
@@ -218,6 +235,7 @@ function ZoneCard({ index, zoneCount, currencies, onRemove }: { index: number; z
           <Badge tone="neutral">{pluralize(countries.length, 'country', 'countries')}</Badge>
         </span>
       }
+      description={`${summarize(zones?.[index]?.standard, 'Standard')}  ·  ${summarize(zones?.[index]?.express, 'Express')}`}
       actions={
         <Button variant="dangerOutline" size="sm" onClick={onRemove} disabled={zoneCount <= 1} icon={<Trash2 className="h-3.5 w-3.5" aria-hidden />}>
           Remove
@@ -226,25 +244,53 @@ function ZoneCard({ index, zoneCount, currencies, onRemove }: { index: number; z
     >
       <div className="space-y-4">
         <TextField label="Zone name" required maxLength={60} containerClassName="sm:max-w-sm" error={zoneErrors?.name?.message} {...register(`zones.${index}.name`)} />
-        <Controller
-          control={control}
-          name={`zones.${index}.countries`}
-          render={({ field, fieldState }) => (
-            <SearchableChecklist
-              legend="Countries"
-              items={items}
-              value={field.value}
-              onChange={field.onChange}
-              searchPlaceholder="Search countries"
-              hint="A country belongs to one zone only. Countries held by another zone are locked — use “Move here” to take one over."
-              error={fieldState.error?.message ?? (zoneErrors?.countries as { message?: string } | undefined)?.message}
-              inputRef={field.ref}
+        <div>
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <p className="text-[13px] font-medium text-ink">Countries in this zone</p>
+              <p className="text-xs text-ink-muted">Orders going to these countries use the rates below.</p>
+            </div>
+            <Button size="sm" variant="outline" onClick={() => setEditing((v) => !v)} icon={showList ? undefined : <Pencil className="h-3.5 w-3.5" aria-hidden />}>
+              {showList ? 'Done' : 'Add / remove countries'}
+            </Button>
+          </div>
+          {!showList &&
+            (countries.length === 0 ? (
+              <p className="rounded-lg border border-dashed border-sand-300 px-3 py-4 text-center text-[13px] text-ink-muted">No countries yet.</p>
+            ) : (
+              <ul className="flex flex-wrap gap-1.5" aria-label="Countries in this zone">
+                {countries.map((c) => (
+                  <li key={c} className="inline-flex items-center gap-1 rounded-full bg-sand-100 py-1 pl-3 pr-1.5 text-xs font-medium text-ink-soft">
+                    {countryName(c)}
+                    <button type="button" onClick={() => removeCountry(c)} aria-label={`Remove ${countryName(c)}`} className="rounded-full p-0.5 text-ink-faint hover:bg-sand-200 hover:text-ink">
+                      <X className="h-3 w-3" aria-hidden />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ))}
+          {showList && (
+            <Controller
+              control={control}
+              name={`zones.${index}.countries`}
+              render={({ field, fieldState }) => (
+                <SearchableChecklist
+                  legend="Countries"
+                  items={items}
+                  value={field.value}
+                  onChange={field.onChange}
+                  searchPlaceholder="Search countries"
+                  hint="A country belongs to one zone only. Countries held by another zone are locked — use “Move here” to take one over."
+                  error={fieldState.error?.message ?? countriesError}
+                  inputRef={field.ref}
+                />
+              )}
             />
           )}
-        />
+        </div>
         <div className="grid gap-3 lg:grid-cols-2">
           {METHODS.map((m) => (
-            <MethodBlock key={m.key} index={index} method={m} currencies={currencies} />
+            <MethodBlock key={m.key} index={index} method={m} currencies={currencies} handling={handling} />
           ))}
         </div>
       </div>
@@ -268,10 +314,10 @@ function QuotePreview({ handling, currencies }: { handling: StoreSettings['handl
       title={
         <span className="flex items-center gap-2">
           <Truck className="h-4 w-4 text-ink-muted" aria-hidden />
-          Quote preview
+          Checkout preview
         </span>
       }
-      description="What checkout would offer, using the unsaved values on this page."
+      description="Pick a country to see exactly what a customer there would be offered. Uses your unsaved values."
     >
       <SelectField label="Destination country" value={code} onChange={(e) => setCode(e.target.value)} containerClassName="sm:max-w-sm">
         {options.map((o) => (
@@ -355,6 +401,59 @@ function UnsupportedSection() {
   );
 }
 
+
+/** Plain-language explanation of how the three parts of this page fit together. */
+function HowItWorks() {
+  const steps = [
+    { n: 1, title: 'Make zones', body: 'Group countries together, e.g. “India” or “Europe”.' },
+    { n: 2, title: 'Set rates', body: 'For each zone choose Standard / Express, the fee and delivery days.' },
+    { n: 3, title: 'Customer sees it', body: 'At checkout they pick a method and see the fee and arrival date.' },
+  ];
+  return (
+    <section className="card p-4 sm:p-5" aria-label="How shipping works">
+      <div className="mb-3 flex items-center gap-2 text-[13px] font-semibold text-ink">
+        <Info className="h-4 w-4 text-brand-700" aria-hidden />
+        How shipping works
+      </div>
+      <ol className="grid gap-3 sm:grid-cols-3">
+        {steps.map((st) => (
+          <li key={st.n} className="flex items-start gap-3 rounded-lg bg-ivory-50/70 p-3">
+            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-brand-600 text-xs font-semibold text-white num">{st.n}</span>
+            <div className="min-w-0">
+              <p className="text-[13px] font-semibold text-ink">{st.title}</p>
+              <p className="mt-0.5 text-xs text-ink-muted">{st.body}</p>
+            </div>
+          </li>
+        ))}
+      </ol>
+      <p className="mt-3 text-xs text-ink-muted">Fees are entered in USD (the base currency) and converted to the customer's currency at checkout. A country in no zone cannot check out.</p>
+    </section>
+  );
+}
+
+/** At-a-glance numbers: zones, countries covered and countries that are blocked. */
+function Overview() {
+  const { control } = useFormContext<Values>();
+  const zones = useWatch({ control, name: 'zones' }) ?? [];
+  const total = countryOptions().length;
+  const covered = new Set(zones.flatMap((z) => z.countries)).size;
+  const stats = [
+    { label: 'Zones', value: zones.length, tone: 'text-ink' },
+    { label: 'Countries you ship to', value: covered, tone: 'text-emerald-800' },
+    { label: 'Not covered (blocked)', value: Math.max(total - covered, 0), tone: total - covered > 0 ? 'text-amber-800' : 'text-ink' },
+  ];
+  return (
+    <dl className="grid grid-cols-3 gap-3">
+      {stats.map((st) => (
+        <div key={st.label} className="card px-4 py-3">
+          <dt className="text-xs text-ink-muted">{st.label}</dt>
+          <dd className={cn('mt-0.5 text-2xl font-semibold num', st.tone)}>{st.value}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
 // ---------------------------------------------------------------------------------------------
 
 function ShippingForm({ settings }: { settings: Settings }) {
@@ -392,19 +491,37 @@ function ShippingForm({ settings }: { settings: Settings }) {
   return (
     <FormProvider {...form}>
       <form onSubmit={handleSubmit(onSubmit, onInvalidForm)} noValidate className="space-y-5">
+        <HowItWorks />
+        <Overview />
 
-        <div className="space-y-5">
-          {fields.map((field, index) => (
-            <ZoneCard key={field.fieldId} index={index} zoneCount={fields.length} currencies={currencies} onRemove={() => void removeZone(index, form.getValues(`zones.${index}.name`))} />
-          ))}
+        <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_22rem]">
+          <div className="min-w-0 space-y-5">
+            <div>
+              <h2 className="mb-1 text-sm font-semibold text-ink">Shipping zones</h2>
+              <p className="mb-3 text-xs text-ink-muted">Each zone is a group of countries with its own rates.</p>
+            </div>
+            {fields.map((field, index) => (
+              <ZoneCard
+                key={field.fieldId}
+                index={index}
+                zoneCount={fields.length}
+                currencies={currencies}
+                handling={settings.store.handlingDays}
+                onRemove={() => void removeZone(index, form.getValues(`zones.${index}.name`))}
+              />
+            ))}
+
+            <Button variant="outline" onClick={() => append(newZone())} icon={<Plus className="h-4 w-4" aria-hidden />}>
+              Add zone
+            </Button>
+
+            <UnsupportedSection />
+          </div>
+
+          <div className="min-w-0 xl:sticky xl:top-4">
+            <QuotePreview handling={settings.store.handlingDays} currencies={currencies} />
+          </div>
         </div>
-
-        <Button variant="outline" onClick={() => append(newZone())} icon={<Plus className="h-4 w-4" aria-hidden />}>
-          Add zone
-        </Button>
-
-        <UnsupportedSection />
-        <QuotePreview handling={settings.store.handlingDays} currencies={currencies} />
 
         <SettingsActionBar dirty={isDirty} saving={isSubmitting} onReset={() => reset()} updatedAt={settings.shipping.updatedAt} />
       </form>
@@ -416,7 +533,7 @@ export default function ShippingSettingsPage() {
   usePageMeta('Shipping', [{ label: 'Settings' }]);
   return (
     <ContentLangProvider>
-      <PageHeader description="Shipping zones, rates and delivery estimates. Rates are entered in USD, the base currency, and converted for shoppers at checkout." />
+      <PageHeader description="Decide where you ship, what customers pay, and how long delivery takes. Customers see this at checkout." />
       <SettingsScopeNotice className="mb-5" />
       <SettingsGate cards={4}>{(settings) => <ShippingForm key={settings.shipping.updatedAt} settings={settings} />}</SettingsGate>
     </ContentLangProvider>

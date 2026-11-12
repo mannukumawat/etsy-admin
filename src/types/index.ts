@@ -439,9 +439,20 @@ export interface Versioned<T> {
   updatedBy: string;
 }
 
+export interface HomepageSlide {
+  id: string;
+  imageId: string | null;
+  title: Localized;
+  subtitle: Localized;
+  ctaLabel: Localized;
+  ctaHref: string;
+}
+
 export interface HomepageContent {
   announcement: { enabled: boolean; text: Localized };
   hero: { title: Localized; subtitle: Localized; imageId: string | null; ctaLabel: Localized; ctaHref: string };
+  /** Extra slider banners after the hero (up to 6). */
+  slides?: HomepageSlide[];
   featuredCategoryIds: string[];
   featuredProductIds: string[];
   bestsellerProductIds: string[];
@@ -458,11 +469,15 @@ export interface PageSection {
   id: string;
   heading: Localized;
   body: Localized;
+  /** Optional section photo (About page). */
+  imageId?: string | null;
 }
 
 export interface PageContent {
   title: Localized;
   intro: Localized;
+  /** Optional banner image (About page). */
+  heroImageId?: string | null;
   sections: PageSection[];
 }
 
@@ -534,6 +549,8 @@ export interface CurrencyConfig {
   enabled: boolean;
   /** 1 USD = rate units of this currency. Manual and illustrative. */
   rate: number;
+  /** true = rate is refreshed from a live exchange-rate feed; false = typed in by hand. */
+  autoRate?: boolean;
   fractionDigits: number;
   /** Converted amounts round to a multiple of this many minor units (INR: 100 = whole rupees). */
   roundingIncrement: number;
@@ -543,6 +560,9 @@ export interface CurrencySettings {
   base: 'USD';
   currencies: CurrencyConfig[];
   ratesUpdatedAt: ISODate;
+  /** Last live-rate sync attempt (null = never) and why it failed, if it did. */
+  autoSyncAt?: ISODate | null;
+  autoSyncError?: string;
   updatedAt: ISODate;
 }
 

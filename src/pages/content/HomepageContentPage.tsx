@@ -1,16 +1,19 @@
-import { useEffect, useState } from 'react';
-import { Controller, FormProvider, useForm, useWatch } from 'react-hook-form';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Controller, FormProvider, useFieldArray, useForm, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { Eye, RotateCcw, Save, Send, X } from 'lucide-react';
-import { CategoryListEditor } from '@/components/content/CategoryListEditor';
+import { Eye, Layers, Plus, RotateCcw, Save, Send, X } from 'lucide-react';
+import { itemGroupsApi } from '@/api';
 import { PUBLISH_SIMULATION_TEXT } from '@/components/content/contentMeta';
 import { HomepagePreview } from '@/components/content/HomepagePreview';
-import { HOMEPAGE_LIST_MAX, ProductListEditor } from '@/components/content/ProductListEditor';
+import { ItemGroupsOverview } from '@/components/content/ItemGroupsOverview';
+import { buildHomepageItemGroups } from '@/components/content/itemGroupSections';
+import { HOMEPAGE_LIST_MAX } from '@/components/content/ProductListEditor';
 import { PublishStatus } from '@/components/content/PublishStatus';
+import { ReorderControls, useReorderFocus } from '@/components/content/ReorderControls';
 import { useUnsavedChangesGuard } from '@/components/content/useUnsavedChangesGuard';
 import { ImageField, useMediaMap } from '@/components/media/MediaPicker';
-import { Button, IconButton } from '@/components/ui/Button';
+import { Button, ButtonLink, IconButton } from '@/components/ui/Button';
 import { ErrorState, Notice, Skeleton } from '@/components/ui/Feedback';
 import { Switch, TextField } from '@/components/ui/Form';
 import { ContentLangProvider, LocalizedField } from '@/components/ui/LocalizedField';
@@ -18,14 +21,15 @@ import { ActionBar, Card, PageHeader } from '@/components/ui/Page';
 import { usePageMeta } from '@/hooks/misc';
 import { invalidate, useQuery } from '@/hooks/useQuery';
 import { ApiError, errorMessage, type FieldIssue } from '@/services/api';
-import { categoryService } from '@/services/catalogServices';
 import { contentService, hasUnpublishedChanges } from '@/services/contentServices';
 import { productService } from '@/services/productService';
 import { confirmAction, toast } from '@/store';
 import type { HomepageContent, Versioned } from '@/types';
 import { formatDateTime } from '@/utils/dates';
 import { applyServerErrors, localized } from '@/utils/forms';
-import { isHttpUrl } from '@/utils/misc';
+import { isHttpUrl, newId } from '@/utils/misc';
+
+const MAX_SLIDES = 6;
 
 const link = (example: string) =>
   z
@@ -40,13 +44,26 @@ const schema = z
   .object({
     announcement: z.object({ enabled: z.boolean(), text: localized(false, 140) }),
     hero: z.object({ title: localized(true, 120), subtitle: localized(false, 300), imageId: z.string().nullable(), ctaLabel: localized(true, 40), ctaHref: link('/shop') }),
+    slides: z
+      .array(
+        z.object({
+          id: z.string(),
+          imageId: z.string().nullable(),
+          title: localized(false, 120),
+          subtitle: localized(false, 240),
+          ctaLabel: localized(false, 40),
+          ctaHref: z.string().trim().refine((v) => v === '' || v.startsWith('/') || isHttpUrl(v), 'Use a site path like /shop or a full https:// URL.'),
+        }),
+      )
+      .max(MAX_SLIDES, `Use at most ${MAX_SLIDES} banners.`),
     featuredCategoryIds: z.array(z.string()),
     featuredProductIds: productIds,
     bestsellerProductIds: z.array(z.string()).max(8, 'Choose at most 8 products.'),
     newArrivalProductIds: z.array(z.string()).max(8, 'Choose at most 8 products.'),
     itemsProductIds: productIds,
     transferProductIds: productIds,
-    story: z.object({ title: localized(true, 120), body: localized(false, 2000), imageId: z.string().nullable(), ctaLabel: localized(false, 40), ctaHref: link('/about') }),
+    // Brand story is no longer edited on the homepage (see Content > About us). Kept only so existing saved data passes through untouched.
+    story: z.object({ title: localized(false, 120), body: localized(false, 2000), imageId: z.string().nullable(), ctaLabel: localized(false, 40), ctaHref: z.string() }),
     newsletter: z.object({ title: localized(true, 120), body: localized(false, 400) }),
   })
   .superRefine((v, ctx) => {
@@ -54,15 +71,6 @@ const schema = z
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['announcement', 'text', 'en'], message: 'Announcement text is required while the bar is enabled.' });
   });
 type Values = z.infer<typeof schema>;
-
-type ProductListName = 'featuredProductIds' | 'bestsellerProductIds' | 'newArrivalProductIds' | 'itemsProductIds' | 'transferProductIds';
-const PRODUCT_LISTS: Array<{ name: ProductListName; title: string; description: string; maxItems: number }> = [
-  { name: 'featuredProductIds', title: 'Featured items', description: 'First product row on the homepage, directly below the hero.', maxItems: 12 },
-  { name: 'newArrivalProductIds', title: 'New arrivals', description: 'Second product row on the homepage.', maxItems: 8 },
-  { name: 'bestsellerProductIds', title: 'Bestsellers', description: 'Third product row on the homepage.', maxItems: 8 },
-  { name: 'itemsProductIds', title: 'Items', description: 'Fourth product row on the homepage.', maxItems: 12 },
-  { name: 'transferProductIds', title: 'Transfer', description: 'Fifth product row on the homepage.', maxItems: 12 },
-];
 
 function HomepageEditor({ doc: loadedDoc }: { doc: Versioned<HomepageContent> }) {
   const [doc, setDoc] = useState(loadedDoc);
@@ -74,6 +82,7 @@ function HomepageEditor({ doc: loadedDoc }: { doc: Versioned<HomepageContent> })
     resolver: zodResolver(schema),
     defaultValues: {
       ...loadedDoc.draft,
+      slides: loadedDoc.draft.slides ?? [],
       itemsProductIds: loadedDoc.draft.itemsProductIds ?? [],
       transferProductIds: loadedDoc.draft.transferProductIds ?? [],
     },
@@ -89,10 +98,14 @@ function HomepageEditor({ doc: loadedDoc }: { doc: Versioned<HomepageContent> })
     formState: { errors, isDirty },
   } = form;
   const announcementEnabled = useWatch({ control, name: 'announcement.enabled' });
+  const { fields: slideFields, append: appendSlide, remove: removeSlide, move: moveSlide } = useFieldArray({ control, name: 'slides', keyName: 'fieldKey' });
+  const addSlideRef = useRef<HTMLButtonElement>(null);
+  const slideFocus = useReorderFocus<HTMLOListElement>(addSlideRef);
 
-  const { data: products } = useQuery('products:all', () => productService.all());
-  const { data: categories } = useQuery('categories', () => categoryService.list());
   const { map: media } = useMediaMap();
+  const { data: itemGroups } = useQuery('item-groups', () => itemGroupsApi.fetchItemGroups());
+  const { data: products } = useQuery('products:all', () => productService.all());
+  const itemSections = useMemo(() => buildHomepageItemGroups(itemGroups, products), [itemGroups, products]);
 
   const [busy, setBusy] = useState<null | 'save' | 'publish' | 'discard'>(null);
   const [publishIssues, setPublishIssues] = useState<FieldIssue[]>([]);
@@ -107,6 +120,7 @@ function HomepageEditor({ doc: loadedDoc }: { doc: Versioned<HomepageContent> })
     setDoc(next);
     reset({
       ...next.draft,
+      slides: next.draft.slides ?? [],
       itemsProductIds: next.draft.itemsProductIds ?? [],
       transferProductIds: next.draft.transferProductIds ?? [],
     });
@@ -265,79 +279,92 @@ function HomepageEditor({ doc: loadedDoc }: { doc: Versioned<HomepageContent> })
             </div>
           </Card>
 
-          {PRODUCT_LISTS.map((list) => (
-            <Card key={list.name} title={list.title} description={`${list.description} Choose up to ${list.maxItems} products; only active products can be published.`}>
-              <Controller
-                control={control}
-                name={list.name}
-                render={({ field }) => (
-                  <ProductListEditor
-                    label={list.title}
-                    value={field.value}
-                    onChange={(ids) => {
-                      field.onChange(ids);
-                      clearErrors(list.name);
-                    }}
-                    products={products}
-                    media={media}
-                    error={errors[list.name]?.message}
-                    max={list.maxItems}
-                  />
-                )}
-              />
-            </Card>
-          ))}
 
-          <Card title="Homepage categories" description="Category shortcuts shown below all three product rows. These group products; choose products above to control homepage items.">
-            <Controller
-              control={control}
-              name="featuredCategoryIds"
-              render={({ field }) => (
-                <CategoryListEditor
-                  value={field.value}
-                  onChange={(ids) => {
-                    field.onChange(ids);
-                    clearErrors('featuredCategoryIds');
-                  }}
-                  categories={categories}
-                  media={media}
-                  error={errors.featuredCategoryIds?.message}
-                />
-              )}
-            />
+          <Card
+            title="Slider banners"
+            description="Extra banners that slide after the hero at the top of the homepage. With none, the slider shows only the hero. Add a banner to make it slide automatically."
+            actions={<span className="text-xs text-ink-muted num">{slideFields.length} / {MAX_SLIDES}</span>}
+          >
+            {slideFields.length === 0 ? (
+              <p className="rounded-lg border border-dashed border-sand-300 px-3 py-6 text-center text-[13px] text-ink-muted">No extra banners. The slider shows only the hero.</p>
+            ) : (
+              <ol ref={slideFocus.ref} className="space-y-4" aria-label="Slider banners">
+                {slideFields.map((f, i) => (
+                  <li key={f.fieldKey} data-reorder-id={f.fieldKey} className="rounded-lg border border-sand-200 bg-ivory-50/60">
+                    <div className="flex items-center justify-between gap-2 border-b border-sand-200 px-3 py-2">
+                      <p className="text-[13px] font-semibold text-ink">
+                        <span className="text-ink-muted">Slide {i + 2}</span> <span className="text-xs font-normal text-ink-faint">(after the hero)</span>
+                      </p>
+                      <ReorderControls
+                        index={i}
+                        count={slideFields.length}
+                        itemLabel={`banner ${i + 1}`}
+                        onMove={(to) => {
+                          const key = f.fieldKey;
+                          moveSlide(i, to);
+                          slideFocus.afterMove(key, to < i ? 'up' : 'down', `Banner moved to position ${to + 1} of ${slideFields.length}.`);
+                        }}
+                        onRemove={() => {
+                          const nextKey = slideFields[i + 1]?.fieldKey ?? slideFields[i - 1]?.fieldKey ?? null;
+                          removeSlide(i);
+                          slideFocus.afterRemove(nextKey, `Banner ${i + 1} removed.`);
+                        }}
+                        removeLabel={`Remove banner ${i + 1}`}
+                      />
+                    </div>
+                    <div className="space-y-4 p-3">
+                      <Controller
+                        control={control}
+                        name={`slides.${i}.imageId`}
+                        render={({ field }) => (
+                          <ImageField
+                            label="Banner image"
+                            aspect="wide"
+                            value={field.value}
+                            onChange={(id) => {
+                              field.onChange(id);
+                              clearErrors(`slides.${i}.imageId`);
+                            }}
+                            hint="Wide image (e.g. 1600×760). Required."
+                            error={errors.slides?.[i]?.imageId?.message}
+                          />
+                        )}
+                      />
+                      <LocalizedField name={`slides.${i}.title`} label="Title (optional)" maxLength={120} />
+                      <LocalizedField name={`slides.${i}.subtitle`} label="Subtitle (optional)" multiline rows={2} maxLength={240} />
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        <LocalizedField name={`slides.${i}.ctaLabel`} label="Button label (optional)" maxLength={40} />
+                        <TextField label="Button link" hint="Site path like /shop or a full https:// URL. The button shows only if both label and link are set." placeholder="/shop" error={errors.slides?.[i]?.ctaHref?.message} {...register(`slides.${i}.ctaHref`)} />
+                      </div>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            )}
+            {slideFocus.live}
+            <Button
+              ref={addSlideRef}
+              variant="outline"
+              size="sm"
+              className="mt-4"
+              icon={<Plus className="h-4 w-4" aria-hidden />}
+              onClick={() => appendSlide({ id: newId('slide'), imageId: null, title: { en: '' }, subtitle: { en: '' }, ctaLabel: { en: '' }, ctaHref: '' })}
+              disabled={slideFields.length >= MAX_SLIDES}
+            >
+              Add banner
+            </Button>
           </Card>
 
-          <Card title="Brand story" description="The “about the studio” block further down the homepage.">
-            <div className="space-y-4">
-              <LocalizedField name="story.title" label="Title" required maxLength={120} />
-              <LocalizedField name="story.body" label="Text" multiline rows={6} maxLength={2000} hint="Leave an empty line between paragraphs." />
-              <div className="grid gap-4 sm:grid-cols-2">
-                <LocalizedField name="story.ctaLabel" label="Button label" maxLength={40} />
-                <TextField label="Button link" required hint="A site path like /about or a full https:// URL." placeholder="/about" error={errors.story?.ctaHref?.message} {...register('story.ctaHref')} />
-              </div>
-              <Controller
-                control={control}
-                name="story.imageId"
-                render={({ field }) => (
-                  <ImageField
-                    label="Story image"
-                    value={field.value}
-                    onChange={(id) => {
-                      field.onChange(id);
-                      clearErrors('story.imageId');
-                    }}
-                    error={errors.story?.imageId?.message}
-                  />
-                )}
-              />
-            </div>
-          </Card>
-
-          <Card title="Newsletter" description="Sign-up block near the footer.">
-            <div className="space-y-4">
-              <LocalizedField name="newsletter.title" label="Title" required maxLength={120} />
-              <LocalizedField name="newsletter.body" label="Text" multiline rows={3} maxLength={400} />
-            </div>
+          <Card
+            title="Item groups"
+            description="Product rows shown on the homepage below the hero. Managed from Item Groups and each product's Item Group field."
+            actions={
+              <ButtonLink to="/item-groups" variant="outline" size="sm" icon={<Layers className="h-3.5 w-3.5" aria-hidden />}>
+                Manage item groups
+              </ButtonLink>
+            }
+          >
+            <ItemGroupsOverview sections={itemSections} media={media} loading={!itemGroups || !products} />
           </Card>
         </form>
 
@@ -368,7 +395,7 @@ function HomepageEditor({ doc: loadedDoc }: { doc: Versioned<HomepageContent> })
           </Button>
         </ActionBar>
 
-        {preview && <HomepagePreview open values={preview} onClose={() => setPreview(null)} categories={categories} products={products} media={media} />}
+        {preview && <HomepagePreview open values={preview} onClose={() => setPreview(null)} media={media} itemSections={itemSections} />}
       </FormProvider>
     </ContentLangProvider>
   );

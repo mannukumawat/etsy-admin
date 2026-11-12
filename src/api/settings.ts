@@ -25,3 +25,8 @@ export function updateCurrencySettings(input: Pick<CurrencySettings, 'currencies
   return apiClient.put<SettingsResponse>('/api/admin/settings/currencies', input);
 }
 
+
+/** Fetches live exchange rates now for every currency set to "Live". */
+export function refreshCurrencyRates(): Promise<SettingsResponse> {
+  return apiClient.post<SettingsResponse>('/api/admin/settings/currencies/refresh', {});
+}

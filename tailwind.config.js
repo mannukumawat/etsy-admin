@@ -47,7 +47,7 @@ export default {
         },
       },
       fontFamily: {
-        sans: ['"Inter Variable"', '"Noto Sans Devanagari"', 'system-ui', '-apple-system', 'Segoe UI', 'sans-serif'],
+        sans: ['"Inter Variable"', 'system-ui', '-apple-system', 'Segoe UI', 'sans-serif'],
         brand: ['"Cormorant Garamond"', 'Georgia', 'serif'],
       },
       fontSize: {

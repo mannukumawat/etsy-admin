@@ -1,14 +1,17 @@
+import { useState } from 'react';
 import { Controller, useForm, useWatch, type Control } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { Coins, Lock } from 'lucide-react';
+import { Coins, Lock, RefreshCw } from 'lucide-react';
 import { onInvalidForm, SettingsActionBar, SettingsGate, SettingsScopeNotice, useUnsavedChangesGuard } from '@/components/settings/SettingsKit';
+import { Button } from '@/components/ui/Button';
 import { Notice } from '@/components/ui/Feedback';
 import { Switch, TextField } from '@/components/ui/Form';
 import { Card, PageHeader } from '@/components/ui/Page';
 import { usePageMeta } from '@/hooks/misc';
 import { invalidate } from '@/hooks/useQuery';
 import { settingsService } from '@/services/settingsService';
+import { errorMessage } from '@/services/api';
 import { toast } from '@/store';
 import type { CurrencyConfig, CurrencySettings, Settings } from '@/types';
 import { formatDateTime } from '@/utils/dates';
@@ -16,7 +19,7 @@ import { applyServerErrors, num } from '@/utils/forms';
 import { cn, pluralize } from '@/utils/misc';
 import { convertFromUsd, formatUsd, formatWithCode } from '@/utils/money';
 
-// Rates are manual and illustrative: 1 USD = `rate` units of the currency. The base currency is fixed to USD.
+// 1 USD = `rate` units of the currency. Each non-base currency is either typed by hand (Manual) or refreshed from a live feed (Live). The base currency is fixed to USD.
 
 const schema = z.object({
   currencies: z.array(
@@ -24,6 +27,7 @@ const schema = z.object({
       code: z.string(),
       name: z.string(),
       enabled: z.boolean(),
+      autoRate: z.boolean().optional(),
       rate: z
         .number({ invalid_type_error: 'Enter a rate.' })
         .positive('Rate must be above zero.')
@@ -43,15 +47,37 @@ const roundingNote = (c: Pick<CurrencyConfig, 'code' | 'roundingIncrement' | 'fr
   return `Rounds to the nearest ${c.roundingIncrement / 100} ${c.code}`;
 };
 
+/** Live = refreshed automatically from an exchange-rate feed; Manual = the number typed here. */
+function SourceToggle({ value, onChange, code }: { value: boolean; onChange: (v: boolean) => void; code: string }) {
+  const option = (v: boolean, label: string) => (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={value === v}
+      onClick={() => onChange(v)}
+      className={cn('px-3 py-1.5 text-xs font-medium transition-colors', value === v ? 'bg-brand-600 text-white' : 'bg-white text-ink-soft hover:bg-sand-100')}
+    >
+      {label}
+    </button>
+  );
+  return (
+    <div role="radiogroup" aria-label={`Rate source for ${code}`} className="inline-flex overflow-hidden rounded-lg border border-sand-300">
+      {option(true, 'Live')}
+      {option(false, 'Manual')}
+    </div>
+  );
+}
+
 function CurrencyRow({ index, control, currency }: { index: number; control: Control<Values>; currency: CurrencyConfig }) {
   const isBase = currency.code === 'USD';
   const row = useWatch({ control, name: `currencies.${index}` });
   const enabled = !!row?.enabled;
   const rate = row?.rate;
+  const auto = !isBase && !!row?.autoRate;
 
   return (
     <li className={cn('px-4 py-3.5', !enabled && 'bg-ivory-50')}>
-      <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,16rem)_auto] sm:items-center">
+      <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,15rem)_auto] sm:items-center">
         <div className="min-w-0">
           <p className="flex flex-wrap items-center gap-2 text-[13px] font-semibold text-ink">
             <span className="font-mono">{currency.code}</span>
@@ -63,6 +89,14 @@ function CurrencyRow({ index, control, currency }: { index: number; control: Con
             )}
           </p>
           <p className="text-xs text-ink-muted">{roundingNote(currency)}</p>
+        </div>
+
+        <div className="sm:justify-self-start">
+          {isBase ? (
+            <span className="text-xs text-ink-muted">Fixed</span>
+          ) : (
+            <Controller control={control} name={`currencies.${index}.autoRate`} render={({ field }) => <SourceToggle code={currency.code} value={!!field.value} onChange={field.onChange} />} />
+          )}
         </div>
 
         <Controller
@@ -77,9 +111,11 @@ function CurrencyRow({ index, control, currency }: { index: number; control: Con
               min={0.0001}
               step={0.0001}
               disabled={isBase}
+              readOnly={auto}
+              hint={undefined}
               prefix="1 USD ="
               suffix={currency.code}
-              className="pl-[4.75rem] text-right"
+              className={cn('pl-[4.75rem] text-right', auto && 'bg-sand-100 text-ink-soft')}
               aria-label={`Rate: 1 USD in ${currency.name}`}
               error={fieldState.error?.message}
               value={Number.isFinite(field.value) ? String(field.value) : ''}
@@ -109,6 +145,7 @@ function CurrencyRow({ index, control, currency }: { index: number; control: Con
           A {formatUsd(SAMPLE_ITEM)} item shows as {formatWithCode(convertFromUsd(SAMPLE_ITEM, { rate, roundingIncrement: currency.roundingIncrement }), currency.code, currency.fractionDigits)}
         </p>
       )}
+      {auto && <p className="mt-1 text-xs text-ink-muted">Updates automatically from a live exchange-rate feed. Switch to Manual to type your own rate.</p>}
       {!enabled && <p className="mt-2 text-xs text-ink-muted">Not offered at checkout.</p>}
     </li>
   );
@@ -162,6 +199,22 @@ function CurrencyForm({ settings }: { settings: Settings }) {
   const { control, handleSubmit, reset, setError, formState } = form;
   const { isDirty, isSubmitting } = formState;
   useUnsavedChangesGuard(isDirty);
+  const [refreshing, setRefreshing] = useState(false);
+  const anyLive = base.some((c) => c.code !== 'USD' && c.autoRate);
+
+  const refreshNow = async () => {
+    setRefreshing(true);
+    try {
+      await settingsService.refreshCurrencyRates();
+      invalidate('settings', 'dashboard', 'orders', 'products');
+      toast('Live rates refreshed.', 'success');
+    } catch (e) {
+      toast(errorMessage(e), 'error');
+      invalidate('settings');
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   const onSubmit = async (v: Values) => {
     try {
@@ -197,14 +250,40 @@ function CurrencyForm({ settings }: { settings: Settings }) {
             Currencies and rates
           </span>
         }
-        description={`Rates last updated ${formatDateTime(settings.currencies.ratesUpdatedAt)}`}
+        description={`Rates last changed ${formatDateTime(settings.currencies.ratesUpdatedAt)}`}
+        actions={
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void refreshNow()}
+            loading={refreshing}
+            disabled={isDirty || !anyLive || refreshing}
+            title={isDirty ? 'Save your changes first' : !anyLive ? 'Set at least one currency to Live and save' : undefined}
+            icon={<RefreshCw className="h-3.5 w-3.5" aria-hidden />}
+          >
+            Refresh rates now
+          </Button>
+        }
         bodyClassName="px-0 py-0 sm:px-0"
       >
-        <div className="px-4 pt-4">
-          <Notice tone="warning" title="Rates are manual, not live">
-            Nothing fetches exchange rates in this demo: you type them, and they are illustrative. Orders already placed keep the rate captured at checkout, so editing a
-            rate never changes order history.
+        <div className="space-y-2 px-4 pt-4">
+          <Notice tone="info" title={anyLive ? 'Live rates are on' : 'All rates are typed by hand'}>
+            {anyLive ? (
+              <>
+                Currencies set to <strong>Live</strong> refresh automatically about every 6 hours from a public exchange-rate feed
+                {settings.currencies.autoSyncAt ? ` (last check ${formatDateTime(settings.currencies.autoSyncAt)})` : ' (no check has run yet)'}. <strong>Manual</strong> currencies never change on their
+                own.
+              </>
+            ) : (
+              <>Set a currency to <strong>Live</strong> and save to keep its rate up to date automatically. Until then every rate is the number you type.</>
+            )}{' '}
+            Orders already placed keep the rate captured at checkout, so a rate change never alters order history.
           </Notice>
+          {anyLive && settings.currencies.autoSyncError && (
+            <Notice tone="warning" title="Last live update had a problem">
+              {settings.currencies.autoSyncError} The previous rates are still in use.
+            </Notice>
+          )}
         </div>
         <ul className="mt-3 divide-y divide-sand-200 border-t border-sand-200">
           {base.map((c, index) => (
@@ -212,7 +291,7 @@ function CurrencyForm({ settings }: { settings: Settings }) {
           ))}
         </ul>
         <p className="border-t border-sand-200 px-4 py-3 text-xs text-ink-muted">
-          Decimal places and rounding are fixed per currency in this preview (INR rounds to whole rupees). Adding or removing currencies is not supported.
+          Decimal places and rounding are fixed per currency (INR rounds to whole rupees). Adding or removing currencies is not supported.
         </p>
       </Card>
 
@@ -227,7 +306,7 @@ export default function CurrencySettingsPage() {
   usePageMeta('Currencies', [{ label: 'Settings' }]);
   return (
     <>
-      <PageHeader description="Which currencies shoppers can see, and the manual rate used to convert from USD." />
+      <PageHeader description="Which currencies shoppers can see, and how prices in USD are converted for them. Each rate is either Live (automatic) or Manual (typed by you)." />
       <SettingsScopeNotice className="mb-5" />
       <SettingsGate cards={3}>{(settings) => <CurrencyForm key={settings.currencies.updatedAt} settings={settings} />}</SettingsGate>
     </>

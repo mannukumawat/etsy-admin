@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { FormProvider, useFieldArray, useForm, useWatch, type Control } from 'react-hook-form';
+import { Controller, FormProvider, useFieldArray, useForm, useWatch, type Control } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useParams } from 'react-router-dom';
 import { z } from 'zod';
@@ -9,6 +9,7 @@ import { PagePreview } from '@/components/content/PagePreview';
 import { PublishStatus } from '@/components/content/PublishStatus';
 import { ReorderControls, useReorderFocus } from '@/components/content/ReorderControls';
 import { useUnsavedChangesGuard } from '@/components/content/useUnsavedChangesGuard';
+import { ImageField } from '@/components/media/MediaPicker';
 import { Button, ButtonLink, IconButton } from '@/components/ui/Button';
 import { EmptyState, ErrorState, Notice, Skeleton } from '@/components/ui/Feedback';
 import { FieldError } from '@/components/ui/Form';
@@ -29,8 +30,9 @@ const MAX_SECTIONS = 30;
 const schema = z.object({
   title: localized(true, 120),
   intro: localized(false, 3000),
+  heroImageId: z.string().nullable().optional(),
   sections: z
-    .array(z.object({ id: z.string(), heading: localized(true, 200), body: localized(true, 10000) }))
+    .array(z.object({ id: z.string(), heading: localized(true, 200), body: localized(true, 10000), imageId: z.string().nullable().optional() }))
     .max(MAX_SECTIONS, `Use at most ${MAX_SECTIONS} sections.`),
 });
 type Values = z.infer<typeof schema>;
@@ -43,6 +45,7 @@ function SectionHeadingText({ control, index, fallback }: { control: Control<Val
 function PageEditor({ doc: loadedDoc }: { doc: PageDoc }) {
   const key = loadedDoc.key;
   const isFaq = key === 'faq';
+  const isAbout = key === 'about';
   const noun = isFaq ? 'question' : 'section';
   const Noun = isFaq ? 'Question' : 'Section';
 
@@ -161,7 +164,7 @@ function PageEditor({ doc: loadedDoc }: { doc: PageDoc }) {
   };
 
   const addSection = () => {
-    append({ id: newId('sec'), heading: { en: '' }, body: { en: '' } }, { focusName: `sections.${fields.length}.heading.en` });
+    append({ id: newId('sec'), heading: { en: '' }, body: { en: '' }, imageId: null }, { focusName: `sections.${fields.length}.heading.en` });
     focus.announce(`${Noun} ${fields.length + 1} added.`);
   };
 
@@ -243,6 +246,15 @@ function PageEditor({ doc: loadedDoc }: { doc: PageDoc }) {
             <div className="space-y-4">
               <LocalizedField name="title" label="Title" required maxLength={120} />
               <LocalizedField name="intro" label="Introduction" multiline rows={4} maxLength={3000} hint="Optional text shown under the title." />
+              {isAbout && (
+                <Controller
+                  control={control}
+                  name="heroImageId"
+                  render={({ field }) => (
+                    <ImageField label="Banner image" aspect="wide" value={field.value ?? null} onChange={field.onChange} hint="Large image at the top of the About page. Pick a wide photo of your studio or craft." />
+                  )}
+                />
+              )}
             </div>
           </Card>
 
@@ -278,6 +290,13 @@ function PageEditor({ doc: loadedDoc }: { doc: PageDoc }) {
                     <div className="space-y-4 p-3">
                       <LocalizedField name={`sections.${i}.heading`} label={isFaq ? 'Question' : 'Heading'} required maxLength={200} />
                       <LocalizedField name={`sections.${i}.body`} label={isFaq ? 'Answer' : 'Text'} required multiline rows={5} hint="Leave an empty line between paragraphs." />
+                      {isAbout && (
+                        <Controller
+                          control={control}
+                          name={`sections.${i}.imageId`}
+                          render={({ field }) => <ImageField label="Section image (optional)" value={field.value ?? null} onChange={field.onChange} hint="Shown beside this section. Sections alternate left and right." />}
+                        />
+                      )}
                     </div>
                   </li>
                 ))}

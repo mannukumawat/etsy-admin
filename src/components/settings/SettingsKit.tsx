@@ -1,6 +1,7 @@
 import { useEffect, type ReactNode } from 'react';
 import { useBlocker } from 'react-router-dom';
 import { RotateCcw, Save } from 'lucide-react';
+import { API_MODE } from '@/api';
 import { Button } from '@/components/ui/Button';
 import { ErrorState, Notice, Skeleton } from '@/components/ui/Feedback';
 import { ActionBar } from '@/components/ui/Page';
@@ -15,6 +16,8 @@ import { convertFromUsd, formatWithCode } from '@/utils/money';
 
 /** Every settings page states what saving actually changes in this phase. */
 export function SettingsScopeNotice({ className, children }: { className?: string; children?: ReactNode }) {
+  // With the live API the settings are really saved (and the storefront reads them), so the demo warning would be wrong.
+  if (API_MODE) return children ? <div className={className}>{children}</div> : null;
   return (
     <Notice tone="demo" title="Admin preview only" className={className}>
       Saved settings affect this admin preview and its calculations only. The storefront is a separate app and keeps its own configuration until the backend
@@ -52,7 +55,22 @@ export function SettingsGate({ children, cards }: { children: (settings: Setting
 }
 
 /** Sticky Save / Reset bar with an "Unsaved changes" status. Place it as the last child of the <form>. */
-export function SettingsActionBar({ dirty, saving, onReset, updatedAt, saveLabel = 'Save changes' }: { dirty: boolean; saving: boolean; onReset: () => void; updatedAt?: string; saveLabel?: string }) {
+export function SettingsActionBar({
+  dirty,
+  saving,
+  onReset,
+  updatedAt,
+  saveLabel = 'Save changes',
+  extra,
+}: {
+  dirty: boolean;
+  saving: boolean;
+  onReset: () => void;
+  updatedAt?: string;
+  saveLabel?: string;
+  /** Extra buttons (e.g. Preview) shown before Reset. */
+  extra?: ReactNode;
+}) {
   return (
     <ActionBar
       status={
@@ -61,6 +79,7 @@ export function SettingsActionBar({ dirty, saving, onReset, updatedAt, saveLabel
         </span>
       }
     >
+      {extra}
       <Button variant="outline" onClick={onReset} disabled={!dirty || saving} icon={<RotateCcw className="h-4 w-4" aria-hidden />}>
         Reset form
       </Button>

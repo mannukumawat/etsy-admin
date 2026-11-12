@@ -109,6 +109,13 @@ export const settingsService = {
     });
   },
 
+  refreshCurrencyRates(): Promise<CurrencySettings> {
+    if (API_MODE) return settingsApi.refreshCurrencyRates().then((s) => s.currencies);
+    return mockRequest(() => {
+      throw new ApiError('conflict', 'Live rates need the live API. Demo data cannot fetch them.');
+    });
+  },
+
   updateCurrencies(input: Pick<CurrencySettings, 'currencies'>): Promise<CurrencySettings> {
     if (API_MODE) return settingsApi.updateCurrencySettings(input).then((s) => s.currencies);
     return mockRequest(() => {

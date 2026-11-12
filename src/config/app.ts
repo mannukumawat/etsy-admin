@@ -7,6 +7,7 @@ import {
   Globe2,
   Home,
   Image,
+  Info,
   Languages,
   LayoutDashboard,
   Layers,
@@ -67,6 +68,7 @@ export const NAV: NavGroup[] = [
     label: 'Content',
     items: [
       { to: '/content/homepage', label: 'Homepage', icon: Home },
+      { to: '/content/pages/about', label: 'About us', icon: Info },
       { to: '/content/pages', label: 'Pages', icon: FileText },
       { to: '/navigation', label: 'Navigation', icon: Link2 },
       { to: '/collections', label: 'Collections', icon: Layers },

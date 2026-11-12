@@ -1,25 +1,18 @@
-import type { ReactNode } from 'react';
 import { ImageOff } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Dialog';
-import { Badge } from '@/components/ui/Feedback';
 import { useSettings } from '@/hooks/misc';
-import type { Category, HomepageContent, LanguageCode, MediaAsset, Product } from '@/types';
+import type { HomepageContent, LanguageCode, MediaAsset } from '@/types';
 import { cn } from '@/utils/misc';
+import type { HomepageItemGroup } from './itemGroupSections';
 import { LText, MissingText, PreviewBanner } from './PreviewKit';
 
 interface PreviewProps {
   open: boolean;
   onClose: () => void;
   values: HomepageContent;
-  categories: Category[] | undefined;
-  products: Product[] | undefined;
   media: Map<string, MediaAsset>;
-}
-
-/** Section label in the preview. Storefront section headings are not editable content, so they are shown as admin annotations. */
-function SectionLabel({ children }: { children: ReactNode }) {
-  return <p className="mb-3 text-2xs font-semibold uppercase tracking-wider text-ink-faint">{children}</p>;
+  itemSections: HomepageItemGroup[];
 }
 
 function Img({ asset, className, alt }: { asset: MediaAsset | undefined; className?: string; alt?: string }) {
@@ -43,39 +36,10 @@ function CtaLink({ label, href, lang }: { label: HomepageContent['hero']['ctaLab
   );
 }
 
-export function HomepagePreview({ open, onClose, values: v, categories, products, media }: PreviewProps) {
+export function HomepagePreview({ open, onClose, values: v, media, itemSections }: PreviewProps) {
   const lang: LanguageCode = 'en';
   const { data: settings } = useSettings();
   const storeName = settings?.store.name ?? 'Your Store';
-  const catById = new Map((categories ?? []).map((c) => [c.id, c]));
-  const productById = new Map((products ?? []).map((p) => [p.id, p]));
-
-  const productGrid = (label: string, ids: string[]) => (
-    <section className="border-t border-sand-200 px-4 py-6 sm:px-8" aria-label={label}>
-      <SectionLabel>{label}</SectionLabel>
-      {ids.length === 0 ? (
-        <p className="text-[13px] text-ink-muted">No products chosen.</p>
-      ) : (
-        <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-          {ids.map((id) => {
-            const p = productById.get(id);
-            const img = p?.images[0] ? media.get(p.images[0].mediaId) : undefined;
-            return (
-              <li key={id} className="min-w-0">
-                <Img asset={img} alt="" className="aspect-square w-full rounded-lg" />
-                <p className="mt-1.5 line-clamp-2 text-[13px] font-medium text-ink">{p ? <LText value={p.name} lang={lang} /> : <MissingText>Missing product</MissingText>}</p>
-                {p && p.status !== 'active' && (
-                  <Badge tone="warning" className="mt-1">
-                    {p.status === 'draft' ? 'Draft' : 'Archived'} — blocks publishing
-                  </Badge>
-                )}
-              </li>
-            );
-          })}
-        </ul>
-      )}
-    </section>
-  );
 
   return (
     <Modal
@@ -119,56 +83,52 @@ export function HomepagePreview({ open, onClose, values: v, categories, products
           <Img asset={v.hero.imageId ? media.get(v.hero.imageId) : undefined} className="aspect-[16/10] w-full rounded-xl" />
         </section>
 
-        {productGrid('Featured items (first row, up to 12)', v.featuredProductIds)}
-        {productGrid('New arrivals (second row, up to 8)', v.newArrivalProductIds)}
-        {productGrid('Bestsellers (third row, up to 8)', v.bestsellerProductIds)}
-        {productGrid('Items (fourth row, up to 12)', v.itemsProductIds ?? [])}
-        {productGrid('Transfer (fifth row, up to 12)', v.transferProductIds ?? [])}
-
-        {/* Homepage categories */}
-        <section className="border-t border-sand-200 px-4 py-6 sm:px-8" aria-label="Homepage categories">
-          <SectionLabel>Homepage categories (below product rows)</SectionLabel>
-          {v.featuredCategoryIds.length === 0 ? (
-            <p className="text-[13px] text-ink-muted">No categories chosen.</p>
-          ) : (
-            <ul className="flex flex-wrap gap-4">
-              {v.featuredCategoryIds.map((id) => {
-                const c = catById.get(id);
-                const img = c?.imageId ? media.get(c.imageId) : undefined;
-                return (
-                  <li key={id} className="flex w-20 flex-col items-center gap-1.5 text-center">
-                    <Img asset={img} alt="" className="h-16 w-16 rounded-full border border-sand-200" />
-                    <span className="text-xs font-medium text-ink">{c ? <LText value={c.name} lang={lang} /> : <MissingText>Missing</MissingText>}</span>
-                    {c && !c.isActive && <Badge tone="warning">Inactive</Badge>}
-                  </li>
-                );
-              })}
+        {/* Extra slider banners */}
+        {(v.slides?.length ?? 0) > 0 && (
+          <section className="border-t border-sand-200 px-4 py-6 sm:px-8" aria-label="Slider banners">
+            <p className="mb-3 text-2xs font-semibold uppercase tracking-wider text-ink-faint">Slider banners (slide after the hero)</p>
+            <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {v.slides!.map((sl, i) => (
+                <li key={sl.id || i} className="relative overflow-hidden rounded-lg border border-sand-200">
+                  <Img asset={sl.imageId ? media.get(sl.imageId) : undefined} className="aspect-[16/8] w-full" />
+                  {(sl.title.en || sl.ctaLabel.en) && (
+                    <div className="absolute inset-0 flex flex-col justify-end bg-gradient-to-t from-black/60 to-transparent p-3 text-white">
+                      {sl.title.en && <p className="font-brand text-base font-semibold leading-tight">{sl.title.en}</p>}
+                      {sl.ctaLabel.en && sl.ctaHref && <span className="mt-1 text-xs opacity-90">{sl.ctaLabel.en} →</span>}
+                    </div>
+                  )}
+                </li>
+              ))}
             </ul>
-          )}
-        </section>
+          </section>
+        )}
 
-        {/* Brand story */}
-        <section className="grid items-center gap-6 border-t border-sand-200 bg-white px-4 py-8 sm:px-8 md:grid-cols-2" aria-label="Brand story">
-          <Img asset={v.story.imageId ? media.get(v.story.imageId) : undefined} className="aspect-[4/3] w-full rounded-xl" />
-          <div className="min-w-0 space-y-3">
-            <LText as="h3" value={v.story.title} lang={lang} className="font-brand text-2xl font-semibold leading-tight text-ink" empty={<MissingText>Story title missing</MissingText>} />
-            <LText as="p" value={v.story.body} lang={lang} className="text-sm text-ink-soft" />
-            {v.story.ctaLabel.en.trim() && <CtaLink label={v.story.ctaLabel} href={v.story.ctaHref} lang={lang} />}
-          </div>
-        </section>
-
-        {/* Newsletter */}
-        <section className="border-t border-sand-200 px-4 py-8 text-center sm:px-8" aria-label="Newsletter">
-          <LText as="h3" value={v.newsletter.title} lang={lang} className="font-brand text-2xl font-semibold text-ink" empty={<MissingText>Newsletter title missing</MissingText>} />
-          <LText as="p" value={v.newsletter.body} lang={lang} className="mx-auto mt-2 max-w-md text-sm text-ink-soft" />
-          <div className="mx-auto mt-4 flex max-w-sm gap-2" aria-hidden>
-            <span className="flex h-10 flex-1 items-center rounded-full border border-sand-300 bg-white px-4 text-left text-[13px] text-ink-faint">email@example.com</span>
-            <span className="flex h-10 items-center rounded-full bg-ink px-4 text-[13px] font-medium text-white">→</span>
-          </div>
-          <p className="mt-2 text-2xs text-ink-faint" lang="en">
-            Sign-up form shown for layout only.
-          </p>
-        </section>
+        {/* Item groups: one product row per group, same as the storefront */}
+        {itemSections.length === 0 ? (
+          <section className="border-t border-sand-200 px-4 py-6 text-[13px] text-ink-muted sm:px-8">No item group rows to show yet.</section>
+        ) : (
+          itemSections.map(({ group, products }) => (
+            <section key={group.id} className="border-t border-sand-200 px-4 py-6 sm:px-8" aria-label={group.nameEn}>
+              <div className="mb-4 flex items-end justify-between gap-3 border-b border-sand-200 pb-3">
+                <h3 className="font-brand text-xl font-semibold text-ink">{group.nameEn}</h3>
+                <span className="shrink-0 text-xs font-medium text-brand-700">View all →</span>
+              </div>
+              <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+                {products.map((p) => {
+                  const img = p.images[0] ? media.get(p.images[0].mediaId) : undefined;
+                  return (
+                    <li key={p.id} className="min-w-0">
+                      <Img asset={img} alt="" className="aspect-square w-full rounded-lg" />
+                      <p className="mt-1.5 overflow-hidden text-[13px] font-medium leading-snug text-ink" style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
+                        <LText value={p.name} lang={lang} />
+                      </p>
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
+          ))
+        )}
       </div>
     </Modal>
   );
