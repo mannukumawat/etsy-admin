@@ -17,6 +17,8 @@ const CustomersPage = lazy(() => import('@/pages/customers/CustomersPage'));
 const CustomerDetailPage = lazy(() => import('@/pages/customers/CustomerDetailPage'));
 const CouponsPage = lazy(() => import('@/pages/CouponsPage'));
 const ReviewsPage = lazy(() => import('@/pages/ReviewsPage'));
+const ContactsPage = lazy(() => import('@/pages/ContactsPage'));
+const HelpPage = lazy(() => import('@/pages/HelpPage'));
 const ReturnsPage = lazy(() => import('@/pages/returns/ReturnsPage'));
 const ReturnDetailPage = lazy(() => import('@/pages/returns/ReturnDetailPage'));
 const TranslationsPage = lazy(() => import('@/pages/TranslationsPage'));
@@ -64,6 +66,8 @@ export const router = createBrowserRouter([
       { path: '/customers/:id', element: <CustomerDetailPage /> },
       { path: '/coupons', element: <CouponsPage /> },
       { path: '/reviews', element: <ReviewsPage /> },
+      { path: '/contacts', element: <ContactsPage /> },
+      { path: '/help-center', element: <HelpPage /> },
       { path: '/returns', element: <ReturnsPage /> },
       { path: '/returns/:id', element: <ReturnDetailPage /> },
       { path: '/content/homepage', element: <HomepageContentPage /> },

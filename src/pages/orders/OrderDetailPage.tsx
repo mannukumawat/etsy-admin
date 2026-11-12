@@ -56,6 +56,16 @@ function ItemsCard({ order }: { order: Order }) {
                 <p className="break-words font-medium text-ink">{line.name.en}</p>
                 {line.variantLabel && <p className="text-xs text-ink-soft">{line.variantLabel}</p>}
                 <p className="break-all font-mono text-xs text-ink-muted">SKU {line.sku}</p>
+                {(line.cancelledQty ?? 0) > 0 && (
+                  <p className="mt-1 inline-block rounded bg-red-50 px-1.5 py-0.5 text-xs font-medium text-red-800">
+                    Customer cancelled {line.cancelledQty} of {line.quantity}
+                  </p>
+                )}
+                {(line.returnedQty ?? 0) > 0 && (
+                  <p className="mt-1 ml-1 inline-block rounded bg-amber-50 px-1.5 py-0.5 text-xs font-medium text-amber-900">
+                    Returned {line.returnedQty} of {line.quantity}
+                  </p>
+                )}
               </div>
               <div className="shrink-0 sm:text-right">
                 <p className="num text-xs text-ink-muted">

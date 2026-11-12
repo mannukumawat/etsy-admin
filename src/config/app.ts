@@ -1,6 +1,7 @@
 import {
   MessageSquareText,
   BadgePercent,
+  BookOpen,
   Boxes,
   FileText,
   FolderTree,
@@ -8,6 +9,7 @@ import {
   Home,
   Image,
   Info,
+  Inbox,
   Languages,
   LayoutDashboard,
   Layers,
@@ -62,11 +64,13 @@ export const NAV: NavGroup[] = [
       { to: '/coupons', label: 'Coupons', icon: BadgePercent },
       { to: '/reviews', label: 'Reviews', icon: MessageSquareText },
       { to: '/returns', label: 'Returns', icon: RotateCcw },
+      { to: '/contacts', label: 'Messages', icon: Inbox },
     ],
   },
   {
     label: 'Content',
     items: [
+      { to: '/help-center', label: 'Help Center', icon: BookOpen },
       { to: '/content/homepage', label: 'Homepage', icon: Home },
       { to: '/content/pages/about', label: 'About us', icon: Info },
       { to: '/content/pages', label: 'Pages', icon: FileText },

@@ -233,6 +233,9 @@ export interface OrderLine {
   unitPrice: Minor;
   quantity: number;
   lineTotal: Minor;
+  /** Units the customer cancelled / returned (0 when none). */
+  cancelledQty?: number;
+  returnedQty?: number;
 }
 
 /** Conversion captured when the order was placed: 1 USD = `rate` units of `currency`. */

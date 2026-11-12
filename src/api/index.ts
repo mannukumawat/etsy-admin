@@ -23,4 +23,8 @@ export * as returnsApi from './returns';
 export type { AdminReturn, AdminReturnList, AdminReturnQuery, ReturnEvent as AdminReturnEvent, ReturnRefund as AdminReturnRefund } from './returns';
 export type { AdminReview, AdminReviewList, AdminReviewQuery, ReviewStatus } from './reviews';
 export * as translationsApi from './translations';
+export * as contactsApi from './contacts';
+export * as helpApi from './help';
+export type { HelpCategory, HelpArticle, HelpCategoryInput, HelpArticleInput } from './help';
+export type { AdminContact, AdminContactList, ContactStatus } from './contacts';
 export type { ContentLang, TranslationList, TranslationRow } from './translations';
