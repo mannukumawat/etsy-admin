@@ -183,22 +183,6 @@ export const orderService = {
     });
   },
 
-  recordCodCollection(
-    id: string,
-    data: { amount: number; collectedAt: string; collector: string; reference?: string; note?: string },
-  ): Promise<Order> {
-    if (API_MODE) return ordersApi.recordCodCollection(id, data);
-    return mockRequest(() => {
-      const o = findOrder(id);
-      if (o.payment.method !== 'cod') throw new ApiError('conflict', 'Only COD orders use this action.');
-      if (o.payment.status !== 'unpaid') throw new ApiError('conflict', 'COD collection already recorded.');
-      if (o.fulfilment.status !== 'delivered') throw new ApiError('conflict', 'Record collection after delivery.');
-      o.payment.status = 'paid';
-      log(o, 'payment', `COD collected: ${fmt(o, data.amount)} by ${data.collector}${data.reference ? ` (ref: ${data.reference})` : ''}${data.note ? `. ${data.note}` : ''}.`);
-      return o;
-    });
-  },
-
   addNote(id: string, body: string): Promise<Order> {
     if (API_MODE) return ordersApi.addOrderNote(id, body);
     return mockRequest(() => {

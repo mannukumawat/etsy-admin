@@ -34,6 +34,8 @@ const ShippingSettingsPage = lazy(() => import('@/pages/settings/ShippingSetting
 const TaxSettingsPage = lazy(() => import('@/pages/settings/TaxSettingsPage'));
 const CurrencySettingsPage = lazy(() => import('@/pages/settings/CurrencySettingsPage'));
 const NotFoundPage = lazy(() => import('@/pages/NotFoundPage'));
+const NotificationsPage = lazy(() => import('@/pages/notifications/NotificationsPage'));
+const WalletDetailPage = lazy(() => import('@/pages/wallet/WalletDetailPage'));
 
 export const router = createBrowserRouter([
   {
@@ -70,6 +72,8 @@ export const router = createBrowserRouter([
       { path: '/help-center', element: <HelpPage /> },
       { path: '/returns', element: <ReturnsPage /> },
       { path: '/returns/:id', element: <ReturnDetailPage /> },
+      { path: '/notifications', element: <NotificationsPage /> },
+      { path: '/wallet/:customerId', element: <WalletDetailPage /> },
       { path: '/content/homepage', element: <HomepageContentPage /> },
       { path: '/content/pages', element: <PagesListPage /> },
       { path: '/content/pages/:key', element: <PageEditorPage /> },

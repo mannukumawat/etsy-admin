@@ -33,13 +33,6 @@ export function markOrderPaid(id: string): Promise<Order> {
   return apiClient.post<Order>(`/api/admin/orders/${encodeURIComponent(id)}/mark-paid`, {});
 }
 
-export function recordCodCollection(
-  id: string,
-  data: { amount: number; collectedAt: string; collector: string; reference?: string; note?: string },
-): Promise<Order> {
-  return apiClient.post<Order>(`/api/admin/orders/${encodeURIComponent(id)}/record-cod-collection`, data);
-}
-
 export function addOrderNote(id: string, body: string): Promise<Order> {
   return apiClient.post<Order>(`/api/admin/orders/${encodeURIComponent(id)}/notes`, { body });
 }

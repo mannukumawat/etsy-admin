@@ -5,10 +5,8 @@ import { isHttpUrl } from './misc';
 //
 //   Fulfilment: unfulfilled → processing → shipped → delivered
 //               unfulfilled | processing → cancelled   (cannot cancel once shipped; returns are future work)
-//               COD: fulfilment advances freely; payment is collected at delivery.
-//               Prepaid: fulfilment can only advance while payment is "paid" or "partially_refunded".
-//   Payment:    unpaid → paid
-//               paid → partially_refunded → refunded
+//               Fulfilment can only advance while payment is "paid" or "partially_refunded".
+//   Payment:    paid → partially_refunded → refunded
 //               failed is terminal (customer must place a new order)
 
 export const FULFILMENT_LABEL: Record<FulfilmentStatus, string> = {
@@ -38,19 +36,13 @@ const FLOW: Record<FulfilmentStatus, FulfilmentStatus[]> = {
 /** Payment states in which money was successfully captured at some point. */
 export const wasPaid = (s: PaymentStatus) => s === 'paid' || s === 'partially_refunded' || s === 'refunded';
 
-/** COD: fulfilment proceeds while payment is pending. Prepaid: must be paid/partially_refunded. */
 export const canFulfil = (o: Pick<Order, 'payment' | 'fulfilment'>) => {
-  if (o.payment.method === 'cod') return o.fulfilment.status !== 'cancelled';
   return o.payment.status === 'paid' || o.payment.status === 'partially_refunded';
 };
 
 export function nextFulfilment(o: Pick<Order, 'payment' | 'fulfilment'>): FulfilmentStatus[] {
   return canFulfil(o) ? FLOW[o.fulfilment.status] : [];
 }
-
-/** COD collection can be recorded once order is delivered and payment still pending. */
-export const canRecordCodCollection = (o: Pick<Order, 'payment' | 'fulfilment'>) =>
-  o.payment.method === 'cod' && o.payment.status === 'unpaid' && o.fulfilment.status === 'delivered';
 
 export interface TrackingInput {
   carrier: string;
@@ -104,7 +96,6 @@ export function paymentAfterRefund(o: Pick<Order, 'total' | 'refundedTotal'>, am
 
 export const canMarkPaid = (o: Pick<Order, 'payment' | 'fulfilment'>) => {
   if (o.payment.status !== 'unpaid' || o.fulfilment.status === 'cancelled') return false;
-  if (o.payment.method === 'cod') return false; // COD uses recordCodCollection instead
   return true;
 };
 

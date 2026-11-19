@@ -1,6 +1,6 @@
-import { useState, type FormEvent, type ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { ArrowLeft, Ban, Banknote, ExternalLink, Mail, Package, PackageCheck, PackageOpen, PackageX, Pencil, Phone, Truck, Undo2, Wallet } from 'lucide-react';
+import { ArrowLeft, Ban, Banknote, ExternalLink, Mail, Package, PackageCheck, PackageOpen, PackageX, Pencil, Phone, Truck, Undo2 } from 'lucide-react';
 import { AddNoteForm } from '@/components/orders/AddNoteForm';
 import { CancelOrderDialog } from '@/components/orders/CancelOrderDialog';
 import { CustomerKindBadge } from '@/components/orders/CustomerKindBadge';
@@ -20,12 +20,12 @@ import type { Order } from '@/types';
 import { formatDateTime } from '@/utils/dates';
 import { cn, isHttpUrl, pluralize } from '@/utils/misc';
 import { formatUsd, formatWithCode, toUsd } from '@/utils/money';
-import { canMarkPaid, canRecordCodCollection, checkCancel, netPaid, nextFulfilment, refundableAmount, wasPaid } from '@/utils/orderRules';
+import { canMarkPaid, checkCancel, netPaid, nextFulfilment, refundableAmount, wasPaid } from '@/utils/orderRules';
 
 const NO_NOTIFY = 'The customer is not notified and the storefront is not updated (separate app, demo).';
 
-type DialogKind = 'ship' | 'tracking' | 'cancel' | 'refund' | 'cod-collection' | null;
-type BusyKind = 'processing' | 'delivered' | 'paid' | 'cod-collection' | null;
+type DialogKind = 'ship' | 'tracking' | 'cancel' | 'refund' | null;
+type BusyKind = 'processing' | 'delivered' | 'paid' | null;
 
 function TotalsRow({ label, sub, value, strong, className }: { label: ReactNode; sub?: ReactNode; value: ReactNode; strong?: boolean; className?: string }) {
   return (
@@ -223,24 +223,15 @@ function AddressCard({ order }: { order: Order }) {
 }
 
 function PaymentCard({ order }: { order: Order }) {
-  const isCod = order.payment.method === 'cod';
   const money = (n: number) => formatWithCode(n, order.currency);
-  const collected = wasPaid(order.payment.status) ? order.total - order.refundedTotal : 0;
-  const outstanding = isCod && order.payment.status === 'unpaid' ? order.total : 0;
   return (
-    <Card title="Payment" description={isCod ? 'Cash on Delivery — customer pays at delivery.' : undefined}>
+    <Card title="Payment">
       <DefinitionList
         items={[
           ['Status', <PaymentBadge status={order.payment.status} />],
           ['Method', PAYMENT_METHOD_LABEL[order.payment.method]],
           ['Reference', <span className="break-all font-mono text-xs">{order.payment.reference || '—'}</span>],
           ['Order total', <span className="num">{money(order.total)}</span>],
-          ...(isCod
-            ? ([
-                ['Collected', <span className={cn('num', collected > 0 ? 'font-semibold text-emerald-700' : 'text-ink-muted')}>{money(collected)}</span>],
-                ...(outstanding > 0 ? [['Outstanding', <span className="num font-semibold text-amber-700">{money(outstanding)}</span>] as [string, ReactNode]] : []),
-              ] as Array<[string, ReactNode]>)
-            : []),
           ...(order.refundedTotal > 0 ? [['Refunded', <span className="num">{money(order.refundedTotal)}</span>] as [string, ReactNode]] : []),
         ]}
       />
@@ -315,122 +306,6 @@ function CurrencyCard({ order }: { order: Order }) {
         )}
       </div>
     </Card>
-  );
-}
-
-function CodCollectionDialog({ open, order, onClose }: { open: boolean; order: Order; onClose: () => void }) {
-  const money = (n: number) => formatWithCode(n, order.currency);
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-  const now = new Date();
-  const localNow = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
-  const [collector, setCollector] = useState('');
-  const [collectedAt, setCollectedAt] = useState(localNow);
-  const [reference, setReference] = useState('');
-  const [note, setNote] = useState('');
-
-  const submit = async (e: FormEvent) => {
-    e.preventDefault();
-    if (!collector.trim()) { setErr('Collector name is required.'); return; }
-    setBusy(true); setErr(null);
-    try {
-      await orderService.recordCodCollection(order.id, {
-        amount: order.total,
-        collectedAt: new Date(collectedAt).toISOString(),
-        collector: collector.trim(),
-        reference: reference.trim() || undefined,
-        note: note.trim() || undefined,
-      });
-      refreshSales();
-      toast(`COD collection recorded for ${order.number}.`, 'success');
-      onClose();
-    } catch (e) {
-      setErr(errorMessage(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  if (!open) return null;
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
-      <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
-        <h2 className="mb-1 text-lg font-semibold text-ink">Record COD Collection</h2>
-        <p className="mb-4 text-sm text-ink-muted">Record payment collected from the customer at delivery.</p>
-        <form onSubmit={(e) => void submit(e)} className="space-y-4">
-          <div>
-            <p className="mb-1 block text-sm font-medium text-ink">Amount collected</p>
-            <p className="num rounded-lg border border-sand-200 bg-sand-50 px-3 py-2 text-sm font-semibold text-ink">{money(order.total)}</p>
-          </div>
-          <div>
-            <label className="mb-1 block text-sm font-medium text-ink">
-              Collection date &amp; time <span className="text-red-500" aria-hidden>*</span>
-            </label>
-            <input
-              type="datetime-local"
-              value={collectedAt}
-              onChange={(e) => setCollectedAt(e.target.value)}
-              className="w-full rounded-lg border border-sand-300 px-3 py-2 text-sm focus:border-brand-400 focus:outline-none"
-              required
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-sm font-medium text-ink">
-              Collected by <span className="text-red-500" aria-hidden>*</span>
-            </label>
-            <input
-              type="text"
-              value={collector}
-              onChange={(e) => setCollector(e.target.value)}
-              placeholder="Delivery agent name or ID"
-              className="w-full rounded-lg border border-sand-300 px-3 py-2 text-sm focus:border-brand-400 focus:outline-none"
-              required
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-sm font-medium text-ink">
-              Reference <span className="text-xs text-ink-faint">(optional)</span>
-            </label>
-            <input
-              type="text"
-              value={reference}
-              onChange={(e) => setReference(e.target.value)}
-              placeholder="Receipt or transaction ID"
-              className="w-full rounded-lg border border-sand-300 px-3 py-2 text-sm focus:border-brand-400 focus:outline-none"
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-sm font-medium text-ink">
-              Note <span className="text-xs text-ink-faint">(optional)</span>
-            </label>
-            <textarea
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-              rows={2}
-              placeholder="Any additional notes"
-              className="w-full resize-none rounded-lg border border-sand-300 px-3 py-2 text-sm focus:border-brand-400 focus:outline-none"
-            />
-          </div>
-          {err && <p className="text-sm text-red-600">{err}</p>}
-          <div className="flex justify-end gap-2 pt-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded-lg border border-sand-300 px-4 py-2 text-sm font-medium hover:bg-sand-50"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={busy}
-              className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
-            >
-              {busy ? 'Recording…' : 'Record collection'}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
   );
 }
 
@@ -557,12 +432,6 @@ export default function OrderDetailPage() {
         Mark as delivered
       </Button>,
     );
-  if (canRecordCodCollection(order))
-    actions.push(
-      <Button key="cod" variant="outline" icon={<Wallet className="h-4 w-4" aria-hidden />} disabled={!!busy} onClick={() => setDialog('cod-collection')}>
-        Record COD collection…
-      </Button>,
-    );
   if (canMarkPaid(order))
     actions.push(
       <Button key="paid" variant="outline" icon={<Banknote className="h-4 w-4" aria-hidden />} loading={busy === 'paid'} disabled={!!busy} onClick={() => void markPaid()}>
@@ -606,14 +475,9 @@ export default function OrderDetailPage() {
       />
 
       <div className="mb-5 space-y-2">
-        {open && pay === 'unpaid' && order.payment.method !== 'cod' && (
+        {open && pay === 'unpaid' && (
           <Notice tone="warning" title="Fulfilment is available once payment is received.">
             This order is awaiting payment. If payment was confirmed outside the system, use "Mark as paid".
-          </Notice>
-        )}
-        {open && pay === 'unpaid' && order.payment.method === 'cod' && (
-          <Notice tone="info" title="Cash on Delivery — payment collected at delivery.">
-            Fulfilment can proceed normally. Use "Record COD collection" once the customer pays on delivery.
           </Notice>
         )}
         {open && pay === 'failed' && (
@@ -656,7 +520,6 @@ export default function OrderDetailPage() {
       <TrackingDialog open={dialog === 'ship' || dialog === 'tracking'} mode={dialog === 'ship' ? 'ship' : 'edit'} order={order} onClose={() => setDialog(null)} />
       <CancelOrderDialog open={dialog === 'cancel'} order={order} onClose={() => setDialog(null)} />
       <RefundDialog open={dialog === 'refund'} order={order} onClose={() => setDialog(null)} />
-      <CodCollectionDialog open={dialog === 'cod-collection'} order={order} onClose={() => setDialog(null)} />
     </>
   );
 }

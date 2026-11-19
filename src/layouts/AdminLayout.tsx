@@ -1,6 +1,6 @@
 import { Suspense, useEffect, useState } from 'react';
 import { Link, Navigate, NavLink, Outlet, useLocation } from 'react-router-dom';
-import { ChevronRight, ExternalLink, FlaskConical, LogOut, Menu as MenuIcon, PanelLeftClose, PanelLeftOpen, RotateCcw, UserCircle2 } from 'lucide-react';
+import { ChevronRight, ExternalLink, LogOut, Menu as MenuIcon, PanelLeftClose, PanelLeftOpen, RotateCcw, UserCircle2 } from 'lucide-react';
 import logoMark from '@/assets/logo-mark.png';
 import { IconButton } from '@/components/ui/Button';
 import { ConfirmHost, Drawer } from '@/components/ui/Dialog';
@@ -11,7 +11,7 @@ import { useSettings } from '@/hooks/misc';
 import { invalidate } from '@/hooks/useQuery';
 import { errorMessage } from '@/services/api';
 import { authService, demoService } from '@/services/settingsService';
-import { API_BASE_URL, API_MODE, setUnauthorizedHandler } from '@/api';
+import { API_MODE, setUnauthorizedHandler } from '@/api';
 import { confirmAction, toast, useAuth, usePageMetaStore, usePrefs } from '@/store';
 import { cn } from '@/utils/misc';
 
