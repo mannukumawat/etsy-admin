@@ -25,17 +25,6 @@ function Img({ asset, className, alt }: { asset: MediaAsset | undefined; classNa
   return <img src={asset.url} alt={alt ?? asset.alt.en} className={cn('object-cover', className)} />;
 }
 
-function CtaLink({ label, href, lang }: { label: HomepageContent['hero']['ctaLabel']; href: string; lang: LanguageCode }) {
-  return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-      <span className="inline-flex min-h-[2.5rem] items-center rounded-full bg-brand-600 px-5 py-2 text-sm font-medium text-white">
-        <LText value={label} lang={lang} empty={<span className="opacity-80">Button label missing</span>} />
-      </span>
-      <span className="font-mono text-2xs text-ink-muted">→ {href || '(no link)'}</span>
-    </div>
-  );
-}
-
 export function HomepagePreview({ open, onClose, values: v, media, itemSections }: PreviewProps) {
   const lang: LanguageCode = 'en';
   const { data: settings } = useSettings();
@@ -78,7 +67,9 @@ export function HomepagePreview({ open, onClose, values: v, media, itemSections 
           <div className="min-w-0 space-y-4">
             <LText as="h3" value={v.hero.title} lang={lang} className="font-brand text-3xl font-semibold leading-tight text-ink sm:text-4xl" empty={<MissingText>Hero title missing</MissingText>} />
             <LText as="p" value={v.hero.subtitle} lang={lang} className="text-sm text-ink-soft" />
-            <CtaLink label={v.hero.ctaLabel} href={v.hero.ctaHref} lang={lang} />
+            <span className="text-xs text-ink-muted">
+              Whole banner opens: <span className="font-mono">{v.hero.ctaHref || '(choose product)'}</span>
+            </span>
           </div>
           <Img asset={v.hero.imageId ? media.get(v.hero.imageId) : undefined} className="aspect-[16/10] w-full rounded-xl" />
         </section>
@@ -91,10 +82,10 @@ export function HomepagePreview({ open, onClose, values: v, media, itemSections 
               {v.slides!.map((sl, i) => (
                 <li key={sl.id || i} className="relative overflow-hidden rounded-lg border border-sand-200">
                   <Img asset={sl.imageId ? media.get(sl.imageId) : undefined} className="aspect-[16/8] w-full" />
-                  {(sl.title.en || sl.ctaLabel.en) && (
+                  {(sl.title.en || sl.ctaHref) && (
                     <div className="absolute inset-0 flex flex-col justify-end bg-gradient-to-t from-black/60 to-transparent p-3 text-white">
                       {sl.title.en && <p className="font-brand text-base font-semibold leading-tight">{sl.title.en}</p>}
-                      {sl.ctaLabel.en && sl.ctaHref && <span className="mt-1 text-xs opacity-90">{sl.ctaLabel.en} →</span>}
+                      {sl.ctaHref && <span className="mt-1 text-xs opacity-90">Whole banner opens product</span>}
                     </div>
                   )}
                 </li>

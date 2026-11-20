@@ -21,7 +21,17 @@ function checkHomepage(c: HomepageContent, publishing: boolean): FieldIssue[] {
   if (c.announcement.text.en.length > 140) add('announcement.text.en', 'Keep the announcement under 140 characters.');
   if (blank(c.hero.title)) add('hero.title.en', 'Hero title is required.');
   if (blank(c.hero.ctaLabel)) add('hero.ctaLabel.en', 'Button label is required.');
-  if (!isLink(c.hero.ctaHref)) add('hero.ctaHref', 'Use a site path like /shop or a full https:// URL.');
+  const bannerLinks = [
+    { href: c.hero.ctaHref, path: 'hero.ctaHref' },
+    ...(c.slides ?? []).map((slide, index) => ({ href: slide.ctaHref, path: `slides.${index}.ctaHref` })),
+  ];
+  for (const link of bannerLinks) {
+    const slug = link.href.match(/^\/product\/([a-z0-9][a-z0-9-]*)$/i)?.[1];
+    const product = slug ? db.products.find((candidate) => candidate.slug === slug) : undefined;
+    if (!slug) add(link.path, 'Choose a product for this banner.');
+    else if (!product) add(link.path, 'The selected product no longer exists.');
+    else if (publishing && product.status !== 'active') add(link.path, `"${product.name.en}" is not active, so its banner cannot be published.`);
+  }
   if (c.hero.imageId && !db.media.some((m) => m.id === c.hero.imageId)) add('hero.imageId', 'Selected image no longer exists.');
   if (blank(c.story.title)) add('story.title.en', 'Story title is required.');
   if (!isLink(c.story.ctaHref)) add('story.ctaHref', 'Use a site path like /about or a full https:// URL.');

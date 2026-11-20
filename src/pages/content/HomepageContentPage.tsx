@@ -15,7 +15,7 @@ import { useUnsavedChangesGuard } from '@/components/content/useUnsavedChangesGu
 import { ImageField, useMediaMap } from '@/components/media/MediaPicker';
 import { Button, ButtonLink, IconButton } from '@/components/ui/Button';
 import { ErrorState, Notice, Skeleton } from '@/components/ui/Feedback';
-import { Switch, TextField } from '@/components/ui/Form';
+import { Switch } from '@/components/ui/Form';
 import { ContentLangProvider, LocalizedField } from '@/components/ui/LocalizedField';
 import { ActionBar, Card, PageHeader } from '@/components/ui/Page';
 import { usePageMeta } from '@/hooks/misc';
@@ -27,23 +27,16 @@ import { confirmAction, toast } from '@/store';
 import type { HomepageContent, Versioned } from '@/types';
 import { formatDateTime } from '@/utils/dates';
 import { applyServerErrors, localized } from '@/utils/forms';
-import { isHttpUrl, newId } from '@/utils/misc';
+import { newId } from '@/utils/misc';
 
 const MAX_SLIDES = 6;
-
-const link = (example: string) =>
-  z
-    .string()
-    .trim()
-    .min(1, 'Enter a link.')
-    .refine((v) => v.startsWith('/') || isHttpUrl(v), `Use a site path like ${example} or a full https:// URL.`);
 
 const productIds = z.array(z.string()).max(HOMEPAGE_LIST_MAX, `Choose at most ${HOMEPAGE_LIST_MAX} products.`);
 
 const schema = z
   .object({
     announcement: z.object({ enabled: z.boolean(), text: localized(false, 140) }),
-    hero: z.object({ title: localized(true, 120), subtitle: localized(false, 300), imageId: z.string().nullable(), ctaLabel: localized(true, 40), ctaHref: link('/shop') }),
+    hero: z.object({ title: localized(true, 120), subtitle: localized(false, 300), imageId: z.string().nullable(), ctaLabel: localized(true, 40), ctaHref: z.string().regex(/^\/product\/[a-z0-9][a-z0-9-]*$/i, 'Choose a product for this banner.') }),
     slides: z
       .array(
         z.object({
@@ -52,7 +45,7 @@ const schema = z
           title: localized(false, 120),
           subtitle: localized(false, 240),
           ctaLabel: localized(false, 40),
-          ctaHref: z.string().trim().refine((v) => v === '' || v.startsWith('/') || isHttpUrl(v), 'Use a site path like /shop or a full https:// URL.'),
+          ctaHref: z.string().trim().regex(/^\/product\/[a-z0-9][a-z0-9-]*$/i, 'Choose a product for this banner.'),
         }),
       )
       .max(MAX_SLIDES, `Use at most ${MAX_SLIDES} banners.`),
@@ -88,13 +81,13 @@ function HomepageEditor({ doc: loadedDoc }: { doc: Versioned<HomepageContent> })
     },
   });
   const {
-    register,
     control,
     handleSubmit,
     setError,
     clearErrors,
     reset,
     getValues,
+    setValue,
     formState: { errors, isDirty },
   } = form;
   const announcementEnabled = useWatch({ control, name: 'announcement.enabled' });
@@ -105,6 +98,7 @@ function HomepageEditor({ doc: loadedDoc }: { doc: Versioned<HomepageContent> })
   const { map: media } = useMediaMap();
   const { data: itemGroups } = useQuery('item-groups', () => itemGroupsApi.fetchItemGroups());
   const { data: products } = useQuery('products:all', () => productService.all());
+  const activeProducts = useMemo(() => (products ?? []).filter((product) => product.status === 'active'), [products]);
   const itemSections = useMemo(() => buildHomepageItemGroups(itemGroups, products), [itemGroups, products]);
 
   const [busy, setBusy] = useState<null | 'save' | 'publish' | 'discard'>(null);
@@ -255,10 +249,21 @@ function HomepageEditor({ doc: loadedDoc }: { doc: Versioned<HomepageContent> })
             <div className="space-y-4">
               <LocalizedField name="hero.title" label="Title" required multiline rows={2} maxLength={120} hint="Press Enter for a line break — the title is shown over two lines." />
               <LocalizedField name="hero.subtitle" label="Subtitle" multiline rows={3} maxLength={300} />
-              <div className="grid gap-4 sm:grid-cols-2">
-                <LocalizedField name="hero.ctaLabel" label="Button label" required maxLength={40} />
-                <TextField label="Button link" required hint="A site path like /shop or a full https:// URL." placeholder="/shop" error={errors.hero?.ctaHref?.message} {...register('hero.ctaHref')} />
-              </div>
+              <Controller
+                control={control}
+                name="hero.ctaHref"
+                render={({ field }) => (
+                  <label className="block">
+                    <span className="label">Featured product</span>
+                    <select className="input" value={field.value} onChange={(event) => { field.onChange(event.target.value); setValue('hero.ctaLabel', { en: 'View product' }, { shouldDirty: true }); }}>
+                      <option value="">Choose an active product</option>
+                      {activeProducts.map((product) => <option key={product.id} value={`/product/${product.slug}`}>{product.name.en}</option>)}
+                    </select>
+                    {errors.hero?.ctaHref?.message && <span className="mt-1 block text-xs text-red-700">{errors.hero.ctaHref.message}</span>}
+                    <span className="mt-1 block text-xs text-ink-muted">The entire hero banner opens this product's purchasable storefront page.</span>
+                  </label>
+                )}
+              />
               <Controller
                 control={control}
                 name="hero.imageId"
@@ -332,10 +337,21 @@ function HomepageEditor({ doc: loadedDoc }: { doc: Versioned<HomepageContent> })
                       />
                       <LocalizedField name={`slides.${i}.title`} label="Title (optional)" maxLength={120} />
                       <LocalizedField name={`slides.${i}.subtitle`} label="Subtitle (optional)" multiline rows={2} maxLength={240} />
-                      <div className="grid gap-4 sm:grid-cols-2">
-                        <LocalizedField name={`slides.${i}.ctaLabel`} label="Button label (optional)" maxLength={40} />
-                        <TextField label="Button link" hint="Site path like /shop or a full https:// URL. The button shows only if both label and link are set." placeholder="/shop" error={errors.slides?.[i]?.ctaHref?.message} {...register(`slides.${i}.ctaHref`)} />
-                      </div>
+                      <Controller
+                        control={control}
+                        name={`slides.${i}.ctaHref`}
+                        render={({ field }) => (
+                          <label className="block">
+                            <span className="label">Featured product</span>
+                            <select className="input" value={field.value} onChange={(event) => { field.onChange(event.target.value); setValue(`slides.${i}.ctaLabel`, { en: 'View product' }, { shouldDirty: true }); }}>
+                              <option value="">Choose an active product</option>
+                              {activeProducts.map((product) => <option key={product.id} value={`/product/${product.slug}`}>{product.name.en}</option>)}
+                            </select>
+                            {errors.slides?.[i]?.ctaHref?.message && <span className="mt-1 block text-xs text-red-700">{errors.slides[i]?.ctaHref?.message}</span>}
+                            <span className="mt-1 block text-xs text-ink-muted">The whole banner opens this product page.</span>
+                          </label>
+                        )}
+                      />
                     </div>
                   </li>
                 ))}
@@ -348,7 +364,7 @@ function HomepageEditor({ doc: loadedDoc }: { doc: Versioned<HomepageContent> })
               size="sm"
               className="mt-4"
               icon={<Plus className="h-4 w-4" aria-hidden />}
-              onClick={() => appendSlide({ id: newId('slide'), imageId: null, title: { en: '' }, subtitle: { en: '' }, ctaLabel: { en: '' }, ctaHref: '' })}
+              onClick={() => appendSlide({ id: newId('slide'), imageId: null, title: { en: '' }, subtitle: { en: '' }, ctaLabel: { en: 'View product' }, ctaHref: '' })}
               disabled={slideFields.length >= MAX_SLIDES}
             >
               Add banner
