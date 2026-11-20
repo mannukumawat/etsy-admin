@@ -35,6 +35,18 @@ export function countryName(code: string): string {
 
 export const PAYMENT_METHOD_LABEL: Record<PaymentMethod, string> = { card: 'Card', upi: 'UPI', wallet: 'Wallet' };
 
+/**
+ * Display label for an order's payment method. Cash on Delivery was removed:
+ * no new order can be 'cod' (frontend and backend both reject it), but rows
+ * placed before the removal may still carry 'cod' in the database. Those
+ * legacy orders were prepaid at the time in practice and must never render
+ * blank — any unknown/legacy value falls back to 'Prepaid'. Do not add a
+ * 'cod' label back.
+ */
+export function paymentMethodLabel(method: string): string {
+  return PAYMENT_METHOD_LABEL[method as PaymentMethod] ?? 'Prepaid';
+}
+
 export const EVENT_LABEL: Record<OrderEvent['type'], string> = {
   created: 'Order placed',
   payment: 'Payment',

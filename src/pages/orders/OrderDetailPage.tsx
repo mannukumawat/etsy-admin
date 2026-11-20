@@ -4,7 +4,7 @@ import { ArrowLeft, Ban, Banknote, ExternalLink, Mail, Package, PackageCheck, Pa
 import { AddNoteForm } from '@/components/orders/AddNoteForm';
 import { CancelOrderDialog } from '@/components/orders/CancelOrderDialog';
 import { CustomerKindBadge } from '@/components/orders/CustomerKindBadge';
-import { ACTOR_LABEL, countryName, customerIdFor, customerPath, EVENT_LABEL, formatRate, itemCount, PAYMENT_METHOD_LABEL, refreshSales } from '@/components/orders/orderDisplay';
+import { ACTOR_LABEL, countryName, customerIdFor, customerPath, EVENT_LABEL, formatRate, itemCount, paymentMethodLabel, refreshSales } from '@/components/orders/orderDisplay';
 import { RefundDialog } from '@/components/orders/RefundDialog';
 import { TrackingDialog } from '@/components/orders/TrackingDialog';
 import { Button, ButtonLink } from '@/components/ui/Button';
@@ -229,7 +229,7 @@ function PaymentCard({ order }: { order: Order }) {
       <DefinitionList
         items={[
           ['Status', <PaymentBadge status={order.payment.status} />],
-          ['Method', PAYMENT_METHOD_LABEL[order.payment.method]],
+          ['Method', paymentMethodLabel(order.payment.method)],
           ['Reference', <span className="break-all font-mono text-xs">{order.payment.reference || '—'}</span>],
           ['Order total', <span className="num">{money(order.total)}</span>],
           ...(order.refundedTotal > 0 ? [['Refunded', <span className="num">{money(order.refundedTotal)}</span>] as [string, ReactNode]] : []),

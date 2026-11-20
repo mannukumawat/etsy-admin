@@ -1,5 +1,5 @@
 import { Link, useSearchParams } from 'react-router-dom';
-import { AlertTriangle, BadgeDollarSign, Boxes, PackageCheck, ReceiptText, ShoppingBag, Users } from 'lucide-react';
+import { BadgeDollarSign, Boxes, PackageCheck, ReceiptText, ShoppingBag, Users } from 'lucide-react';
 import { BarList, SalesChart } from '@/components/charts/Charts';
 import { ErrorState, Notice, Skeleton } from '@/components/ui/Feedback';
 import { Card, StatCard } from '@/components/ui/Page';
@@ -213,9 +213,6 @@ export default function DashboardPage() {
               <li>All figures are computed live from orders and accounts in the store database.</li>
             </ul>
           </details>
-          <p className="flex items-center gap-1.5 text-xs text-ink-muted">
-            <AlertTriangle className="h-3.5 w-3.5" aria-hidden /> Only cash-on-delivery payments are real today; no online payment gateway is configured.
-          </p>
         </>
       )}
     </div>
