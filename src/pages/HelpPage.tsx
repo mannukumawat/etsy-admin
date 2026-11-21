@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { ArrowLeft, BookOpen, ChevronRight, CreditCard, FileText, FolderOpen, HelpCircle, Package, Pencil, Plus, RefreshCw, Search, Settings, ShoppingBag, Star, Trash2, Truck, type LucideIcon } from 'lucide-react';
+import { ArrowLeft, BookOpen, ChevronRight, CreditCard, FileText, FolderOpen, HelpCircle, Mail, Package, Pencil, Plus, RefreshCw, Search, Settings, ShoppingBag, Star, Trash2, Truck, type LucideIcon } from 'lucide-react';
 import { helpApi, type HelpArticle, type HelpCategory } from '@/api';
 import { Button } from '@/components/ui/Button';
 import { DataTable, type Column } from '@/components/ui/DataTable';
@@ -48,6 +48,7 @@ const ICON_OPTIONS = [
   { value: 'settings', label: 'Settings / Account' },
   { value: 'shopping-bag', label: 'Shopping Bag' },
   { value: 'star', label: 'Star / Reviews' },
+  { value: 'mail', label: 'Mail / Contact' },
 ];
 
 /** M-O5: render the stored icon name as a real Lucide icon instead of the raw string. */
@@ -60,6 +61,7 @@ const ICON_BY_NAME: Record<string, LucideIcon> = {
   settings: Settings,
   'shopping-bag': ShoppingBag,
   star: Star,
+  mail: Mail,
 };
 
 export function HelpCategoryIcon({ name, className = 'h-4 w-4' }: { name: string; className?: string }) {
