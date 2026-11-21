@@ -3,7 +3,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom';
 import { z } from 'zod';
-import logoMark from '@/assets/logo-mark.webp';
+import { Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Notice } from '@/components/ui/Feedback';
 import { TextField } from '@/components/ui/Form';
@@ -48,7 +48,7 @@ export default function LoginPage() {
   return (
     <div className="w-full max-w-md">
       <div className="mb-6 flex items-center justify-center gap-2.5">
-        <img src={logoMark} alt="" className="h-9 w-9 object-contain" />
+        <Sparkles className="h-9 w-9 text-brand-600" aria-hidden />
         <p className="font-brand text-3xl font-semibold">Your Store</p>
       </div>
       <div className="card p-6 sm:p-7">

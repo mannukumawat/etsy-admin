@@ -1,7 +1,6 @@
 import { Suspense, useEffect, useState } from 'react';
 import { Link, Navigate, NavLink, Outlet, useLocation } from 'react-router-dom';
-import { ChevronRight, ExternalLink, LogOut, Menu as MenuIcon, PanelLeftClose, PanelLeftOpen, RotateCcw, UserCircle2 } from 'lucide-react';
-import logoMark from '@/assets/logo-mark.webp';
+import { ChevronRight, ExternalLink, LogOut, Menu as MenuIcon, PanelLeftClose, PanelLeftOpen, RotateCcw, Sparkles, UserCircle2 } from 'lucide-react';
 import { fetchOwnerUnreadCount } from '@/api/notifications';
 import { useMediaMap } from '@/components/media/MediaPicker';
 import { IconButton } from '@/components/ui/Button';
@@ -57,7 +56,7 @@ function Brand({ collapsed }: { collapsed?: boolean }) {
       {logoUrl ? (
         <img src={logoUrl} alt="" className="h-8 w-8 shrink-0 rounded-full border border-sand-200 object-cover" />
       ) : (
-        <img src={logoMark} alt="" className="h-8 w-8 shrink-0 object-contain" />
+        <Sparkles className="h-8 w-8 shrink-0 text-brand-600" aria-hidden />
       )}
 
       {!collapsed && (
