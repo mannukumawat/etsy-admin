@@ -27,7 +27,7 @@ const LANGS: Array<{ code: ContentLang; label: string }> = [
   { code: 'es', label: 'Español' },
 ];
 
-function Row({ row, lang }: { row: TranslationRow; lang: ContentLang }) {
+function Row({ row, lang, scope }: { row: TranslationRow; lang: ContentLang; scope: 'content' | 'ui' }) {
   const saved = row.translations[lang];
   const [text, setText] = useState(saved);
   const [busy, setBusy] = useState(false);
@@ -41,7 +41,8 @@ function Row({ row, lang }: { row: TranslationRow; lang: ContentLang }) {
     setBusy(true);
     setError(null);
     try {
-      await translationsApi.saveTranslation(row.source, lang, text.trim());
+      if (scope === 'ui' && row.key) await translationsApi.saveUiTranslation(row.key, lang, text.trim());
+      else await translationsApi.saveTranslation(row.source, lang, text.trim());
       invalidate('translations');
       toast(text.trim() ? 'Translation saved.' : 'Translation removed — this text now shows in English.', 'success');
     } catch (e) {
@@ -100,12 +101,15 @@ export default function TranslationsPage() {
   const lang = (LANGS.some((l) => l.code === f.lang) ? f.lang : 'de') as ContentLang;
   const status = f.status ?? 'all';
   const [search, setSearch] = useState(list.query.q ?? '');
+  const [scope, setScope] = useState<'content' | 'ui'>('content');
   // M-O16: live search — the URL updates as you type (replace) and the request is
   // debounced 300ms, like every other list. (It used to apply only on submit/blur.)
   const q = useDebounced(search, 300);
   const { data, isLoading, error, refetch } = useQuery(
-    `translations:${lang}:${status}:${q}:${list.query.page}`,
-    () => translationsApi.fetchTranslations({ q: q || undefined, lang, status, page: list.query.page, pageSize: 25 }),
+    `translations:${scope}:${lang}:${status}:${q}:${list.query.page}`,
+    () => scope === 'ui'
+      ? translationsApi.fetchUiTranslations({ q: q || undefined, lang, status, page: list.query.page, pageSize: 25 })
+      : translationsApi.fetchTranslations({ q: q || undefined, lang, status, page: list.query.page, pageSize: 25 }),
     { keepPrevious: true },
   );
 
@@ -120,6 +124,11 @@ export default function TranslationsPage() {
         }
       />
       <div className="card">
+        <div className="flex gap-1 border-b border-sand-200 px-4 pt-3" role="tablist" aria-label="Translation type">
+          {([['content', 'Store content'], ['ui', 'Interface labels']] as const).map(([value, label]) => (
+            <button key={value} type="button" role="tab" aria-selected={scope === value} onClick={() => { setScope(value); list.update({ page: 1 }, false); }} className={cn('rounded-t-lg px-4 py-2 text-sm font-medium', scope === value ? 'bg-ink text-white' : 'text-ink-soft hover:bg-sand-100')}>{label}</button>
+          ))}
+        </div>
         <div className="flex flex-col gap-3 border-b border-sand-200 px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
           <div role="tablist" aria-label="Language" className="flex flex-wrap gap-1">
             {LANGS.map((l) => (
@@ -178,7 +187,7 @@ export default function TranslationsPage() {
             </div>
             <ul className="divide-y divide-sand-200">
               {data.items.map((row) => (
-                <Row key={`${lang}:${row.source}`} row={row} lang={lang} />
+                <Row key={`${lang}:${row.key ?? row.source}`} row={row} lang={lang} scope={scope} />
               ))}
             </ul>
             <div className="flex items-center justify-between border-t border-sand-200 px-4 py-3 text-[13px] text-ink-muted">
