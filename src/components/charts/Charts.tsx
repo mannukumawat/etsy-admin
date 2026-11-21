@@ -6,7 +6,7 @@ import { cn } from '@/utils/misc';
 // Charts follow the dataviz rules: one series per chart (no dual axis), 2px line + ~10% area wash,
 // hairline gridlines, crosshair + tooltip that also works from the keyboard, and a table view.
 
-const SERIES = '#C04A17'; // brand.600 — validated against the white chart surface
+const SERIES = '#A64B32'; // brand.600 — validated against the white chart surface
 const GRID = '#E7DDCF';
 
 function niceMax(v: number): number {

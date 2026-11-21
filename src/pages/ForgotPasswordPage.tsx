@@ -16,6 +16,7 @@ type Values = z.infer<typeof schema>;
 export default function ForgotPasswordPage() {
   usePageMeta('Reset password');
   const [sentTo, setSentTo] = useState<string | null>(null);
+  const [delivered, setDelivered] = useState<boolean | null>(null);
   const [error, setError] = useState<string | null>(null);
   const {
     register,
@@ -26,7 +27,8 @@ export default function ForgotPasswordPage() {
   const onSubmit = async ({ email }: Values) => {
     setError(null);
     try {
-      await authService.requestReset(email);
+      const result = await authService.requestReset(email);
+      setDelivered(result.delivered);
       setSentTo(email);
     } catch (e) {
       setError(errorMessage(e));
@@ -38,11 +40,17 @@ export default function ForgotPasswordPage() {
       <p className="mb-6 text-center font-brand text-3xl font-semibold">Your Store</p>
       <div className="card p-6 sm:p-7">
         <h1 className="text-xl">Reset your admin password</h1>
-        <p className="mt-1 text-[13px] text-ink-muted">Enter the owner email address. In the live system a reset link would be emailed.</p>
+        <p className="mt-1 text-[13px] text-ink-muted">Enter the owner email address and we will email you a reset link. The link expires after 1 hour.</p>
         {sentTo ? (
-          <Notice tone="success" role="status" className="mt-5">
-            If <strong>{sentTo}</strong> belongs to an admin, reset instructions would be sent. <strong>Demo:</strong> no email was sent and no password changed.
-          </Notice>
+          delivered ? (
+            <Notice tone="success" role="status" className="mt-5">
+              If <strong>{sentTo}</strong> belongs to an admin, a reset link has been emailed. Check your inbox (and spam folder) — the link expires after 1 hour.
+            </Notice>
+          ) : (
+            <Notice tone="warning" role="status" className="mt-5">
+              We could not send the reset email: email delivery is not configured on the server yet. Your password has not changed. Ask the store owner to set up email sending (SMTP), then try again.
+            </Notice>
+          )
         ) : (
           <form onSubmit={handleSubmit(onSubmit)} noValidate className="mt-5 space-y-4">
             {error && (

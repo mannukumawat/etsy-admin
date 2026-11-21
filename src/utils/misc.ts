@@ -64,3 +64,12 @@ export function isHttpUrl(value: string): boolean {
     return false;
   }
 }
+
+/** L-S2: social links must be https (the backend now rejects http too). */
+export function isHttpsUrl(value: string): boolean {
+  try {
+    return new URL(value).protocol === 'https:';
+  } catch {
+    return false;
+  }
+}

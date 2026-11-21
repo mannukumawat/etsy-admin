@@ -15,6 +15,7 @@ import { usePageMeta } from '@/hooks/misc';
 import { useQuery } from '@/hooks/useQuery';
 import { ApiError, errorMessage } from '@/services/api';
 import { orderService } from '@/services/salesServices';
+import { API_MODE } from '@/api';
 import { confirmAction, toast } from '@/store';
 import type { Order } from '@/types';
 import { formatDateTime } from '@/utils/dates';
@@ -22,10 +23,15 @@ import { cn, isHttpUrl, pluralize } from '@/utils/misc';
 import { formatUsd, formatWithCode, toUsd } from '@/utils/money';
 import { canMarkPaid, checkCancel, netPaid, nextFulfilment, refundableAmount, wasPaid } from '@/utils/orderRules';
 
-const NO_NOTIFY = 'The customer is not notified and the storefront is not updated (separate app, demo).';
+// M-O12: in live mode a status change IS saved and the storefront reads it (on
+// refresh); only customer notification is missing (email is not configured). In
+// demo mode the change stays in this admin preview.
+const NO_NOTIFY = API_MODE
+  ? 'The customer is not emailed about this change (email is not configured). The storefront shows the updated status when the page is refreshed.'
+  : 'Demo mode: the customer is not notified and the storefront is not updated — the change stays in this admin preview.';
 
 type DialogKind = 'ship' | 'tracking' | 'cancel' | 'refund' | null;
-type BusyKind = 'processing' | 'delivered' | 'paid' | null;
+type BusyKind = 'processing' | 'delivered' | 'paid' | 'verify' | 'restock' | null;
 
 function TotalsRow({ label, sub, value, strong, className }: { label: ReactNode; sub?: ReactNode; value: ReactNode; strong?: boolean; className?: string }) {
   return (
@@ -239,6 +245,58 @@ function PaymentCard({ order }: { order: Order }) {
   );
 }
 
+const REFUND_STATUS_TONE: Record<string, 'neutral' | 'success' | 'warning' | 'danger' | 'info'> = {
+  pending: 'warning',
+  processing: 'info',
+  completed: 'success',
+  failed: 'danger',
+};
+const REFUND_STATUS_LABEL: Record<string, string> = {
+  pending: 'Pending verification',
+  processing: 'Processing',
+  completed: 'Completed',
+  failed: 'Failed',
+};
+const REFUND_METHOD_LABEL: Record<string, string> = {
+  original: 'Original payment',
+  manual_bank: 'Manual bank transfer',
+  manual_upi: 'Manual UPI',
+  store_credit: 'Store credit (wallet)',
+};
+
+/** Every refund on the order with its real state — gateway id, method, status — plus verification for pending manual refunds. */
+function RefundsCard({ order, onVerify, busy }: { order: Order; onVerify: (refundId: string) => void; busy: boolean }) {
+  const money = (n: number) => formatWithCode(n, order.currency);
+  const refunds = order.refunds ?? [];
+  if (!refunds.length) return null;
+  return (
+    <Card title="Refunds">
+      <ul className="space-y-3">
+        {refunds.map((r) => (
+          <li key={r.id} className="rounded-lg border border-sand-200 px-3 py-2.5">
+            <div className="flex items-center justify-between gap-2">
+              <span className="num font-medium text-ink">{money(r.amount)}</span>
+              <Badge tone={REFUND_STATUS_TONE[r.status] ?? 'neutral'}>{REFUND_STATUS_LABEL[r.status] ?? r.status}</Badge>
+            </div>
+            <p className="mt-1 text-xs text-ink-muted">
+              {REFUND_METHOD_LABEL[r.method] ?? r.method} · {r.reason}
+            </p>
+            {r.reference && <p className="mt-0.5 break-all font-mono text-xs text-ink-muted">Ref {r.reference}</p>}
+            {r.completedAt && <p className="mt-0.5 text-xs text-ink-muted">Completed {formatDateTime(r.completedAt)}</p>}
+            {r.status === 'processing' && <p className="mt-1 text-xs text-ink-muted">The provider has accepted this refund; the order totals will update once it settles.</p>}
+            {r.status === 'failed' && r.note && <p className="mt-1 text-xs text-red-700">{r.note}</p>}
+            {r.status === 'pending' && (r.method === 'manual_bank' || r.method === 'manual_upi') && (
+              <Button size="xs" variant="outline" className="mt-2" disabled={busy} onClick={() => onVerify(r.id)}>
+                Mark as verified
+              </Button>
+            )}
+          </li>
+        ))}
+      </ul>
+    </Card>
+  );
+}
+
 function FulfilmentCard({ order, onEditTracking }: { order: Order; onEditTracking: () => void }) {
   const f = order.fulfilment;
   const shipped = f.status === 'shipped' || f.status === 'delivered';
@@ -339,7 +397,7 @@ export default function OrderDetailPage() {
         <EmptyState
           icon={<PackageX className="h-6 w-6" aria-hidden />}
           title="Order not found"
-          body="This order doesn’t exist, or the demo data was reset."
+          body={API_MODE ? 'This order doesn’t exist.' : 'This order doesn’t exist, or the demo data was reset.'}
           action={
             <ButtonLink to="/orders" size="sm" icon={<ArrowLeft className="h-4 w-4" aria-hidden />}>
               Back to orders
@@ -389,6 +447,26 @@ export default function OrderDetailPage() {
     }
   };
 
+  const restockNow = async () => {
+    // L-I6: an order cancelled without restock can now be restocked afterwards.
+    const ok = await confirmAction({
+      title: `Return the items of ${order.number} to stock?`,
+      body: 'Each item’s quantity is added back to its variant and logged as a stock adjustment. This can only be done once.',
+      confirmLabel: 'Restock now',
+    });
+    if (!ok) return;
+    setBusy('restock');
+    try {
+      await orderService.restock(order.id);
+      refreshSales();
+      toast(`Items from order ${order.number} returned to stock.`, 'success');
+    } catch (e) {
+      toast(errorMessage(e), 'error');
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const markPaid = async () => {
     const ok = await confirmAction({
       title: `Mark ${order.number} as paid?`,
@@ -406,6 +484,26 @@ export default function OrderDetailPage() {
       await orderService.markPaid(order.id);
       refreshSales();
       toast(`Order ${order.number} marked as paid.`, 'success');
+    } catch (e) {
+      toast(errorMessage(e), 'error');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  /** Verify a pending manual refund: only now do the order totals move. */
+  const verifyRefund = async (refundId: string) => {
+    const ok = await confirmAction({
+      title: 'Mark this refund as verified?',
+      body: <p>Only verify once the money has actually arrived. This moves the order totals and cannot be undone.</p>,
+      confirmLabel: 'Mark as verified',
+    });
+    if (!ok) return;
+    setBusy('verify');
+    try {
+      await orderService.verifyRefund(order.id, refundId);
+      refreshSales();
+      toast('Refund verified.', 'success');
     } catch (e) {
       toast(errorMessage(e), 'error');
     } finally {
@@ -441,7 +539,7 @@ export default function OrderDetailPage() {
   if (refundable > 0)
     actions.push(
       <Button key="refund" variant="outline" icon={<Undo2 className="h-4 w-4" aria-hidden />} disabled={!!busy} onClick={() => setDialog('refund')}>
-        Refund (simulated)…
+        Refund…
       </Button>,
     );
   if (cancelBlock === null)
@@ -491,13 +589,23 @@ export default function OrderDetailPage() {
           </Notice>
         )}
         {ful === 'cancelled' && (
-          <Notice tone="info" title="This order is cancelled.">
-            {order.fulfilment.restocked ? 'Items were returned to stock.' : 'Items were not returned to stock.'}
+          <Notice
+            tone="info"
+            title="This order is cancelled."
+            action={
+              !order.fulfilment.restocked ? (
+                <Button size="xs" variant="outline" disabled={!!busy} onClick={() => void restockNow()}>
+                  Restock now
+                </Button>
+              ) : undefined
+            }
+          >
+            {order.fulfilment.restocked ? 'Items were returned to stock.' : 'Items were not returned to stock — this order was cancelled without restock.'}
             {refundable > 0 && ' Part of the payment has not been refunded yet.'}
           </Notice>
         )}
         {(ful === 'shipped' || ful === 'delivered') && cancelBlock && <p className="text-xs text-ink-muted">{cancelBlock}</p>}
-        <Notice tone="demo">Status changes here don’t notify the customer (email/SMS not configured). The storefront is a separate app and requires a page refresh to reflect changes.</Notice>
+        <Notice tone="info">Status changes here don’t notify the customer (email/SMS not configured). The storefront is a separate app and requires a page refresh to reflect changes.</Notice>
       </div>
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_340px] lg:grid-rows-[auto_1fr]">
@@ -508,6 +616,7 @@ export default function OrderDetailPage() {
           <CustomerCard order={order} />
           <AddressCard order={order} />
           <PaymentCard order={order} />
+          <RefundsCard order={order} onVerify={(refundId) => void verifyRefund(refundId)} busy={busy === 'verify'} />
           <FulfilmentCard order={order} onEditTracking={() => setDialog('tracking')} />
           <CurrencyCard order={order} />
         </div>

@@ -62,7 +62,7 @@ function mediaFrom(id: string, url: string, fileName: string, alt: Localized, cr
 const LOGO_SVG =
   'data:image/svg+xml;charset=utf-8,' +
   encodeURIComponent(
-    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 64"><rect width="240" height="64" fill="#FBF7F0"/><rect x="8" y="8" width="48" height="48" rx="11" fill="#C04A17"/><path d="M20 22h24l-2.6 20a3.5 3.5 0 0 1-3.5 3H26a3.5 3.5 0 0 1-3.5-3z" fill="#FBF7F0"/><text x="68" y="42" font-family="Georgia,serif" font-size="26" fill="#2B2724">Your Store</text></svg>',
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 64"><rect width="240" height="64" fill="#FAF7F2"/><rect x="8" y="8" width="48" height="48" rx="11" fill="#A64B32"/><path d="M20 22h24l-2.6 20a3.5 3.5 0 0 1-3.5 3H26a3.5 3.5 0 0 1-3.5-3z" fill="#FAF7F2"/><text x="68" y="42" font-family="Georgia,serif" font-size="26" fill="#2B2724">Your Store</text></svg>',
   );
 
 // ---------------------------------------------------------------------------------------------
@@ -338,10 +338,14 @@ const TAX_LABELS: Record<string, string> = {
 function buildSettings(now: Date): Settings {
   const iso = now.toISOString();
   const currencies: CurrencyConfig[] = [
+    // L-S6: current rates as of 2026-11-20 (RBI reference rates: INR 92.97 per USD,
+    // INR 102.15 per EUR, INR 121.93 per GBP → 1 USD = EUR 0.91, GBP 0.76), not the
+    // illustrative 2026-10-01 values. Still only a starting point — switch to Live
+    // in Settings → Currencies to keep them fresh automatically.
     { code: 'USD', name: 'US dollar', enabled: true, rate: 1, fractionDigits: 2, roundingIncrement: 1 },
-    { code: 'INR', name: 'Indian rupee', enabled: true, rate: 84, fractionDigits: 0, roundingIncrement: 100 },
-    { code: 'EUR', name: 'Euro', enabled: true, rate: 0.92, fractionDigits: 2, roundingIncrement: 1 },
-    { code: 'GBP', name: 'British pound', enabled: true, rate: 0.78, fractionDigits: 2, roundingIncrement: 1 },
+    { code: 'INR', name: 'Indian rupee', enabled: true, rate: 93, fractionDigits: 0, roundingIncrement: 100 },
+    { code: 'EUR', name: 'Euro', enabled: true, rate: 0.91, fractionDigits: 2, roundingIncrement: 1 },
+    { code: 'GBP', name: 'British pound', enabled: true, rate: 0.76, fractionDigits: 2, roundingIncrement: 1 },
   ];
   return {
     store: {
@@ -371,6 +375,7 @@ function buildSettings(now: Date): Settings {
       unsupportedMessage: {
         en: 'We don’t ship to this destination yet. Please choose another address.',
       },
+      freeShippingThreshold: null,
       updatedAt: iso,
     },
     tax: {
@@ -385,7 +390,7 @@ function buildSettings(now: Date): Settings {
       })),
       updatedAt: iso,
     },
-    currencies: { base: 'USD', currencies, ratesUpdatedAt: '2026-10-01T00:00:00.000Z', updatedAt: iso },
+    currencies: { base: 'USD', currencies, ratesUpdatedAt: '2026-11-20T00:00:00.000Z', updatedAt: iso },
   };
 }
 
@@ -621,6 +626,28 @@ function buildOrders(products: Product[], customers: Customer[], settings: Setti
       refundedTotal,
       shippingMethod: { id: express ? 'express' : 'standard', label: express ? 'Express shipping' : 'Standard shipping', minDays: method.minDays, maxDays: method.maxDays },
       payment: { status: payment, method: paymentMethod, reference: '' },
+      // Demo orders that were refunded carry a completed refund record, so the
+      // refunds card on the order page has realistic data in demo mode.
+      refunds:
+        refundKind === 'none'
+          ? []
+          : [
+              {
+                id: `rfnd_${i}`,
+                orderId: '',
+                returnId: null,
+                amount: refundedTotal,
+                reason: refundKind === 'full' ? 'Order cancelled' : 'Goodwill — chipped item',
+                method: paymentMethod === 'wallet' ? 'store_credit' : 'original',
+                status: 'completed',
+                reference: `DEMO-RFND-${240101 + i}`,
+                completedAt: events[events.length - 1].at,
+                failedAt: null,
+                recordedBy: OWNER,
+                note: null,
+                createdAt: events[events.length - 1].at,
+              },
+            ],
       fulfilment: {
         status: fulfilment,
         carrier: shipped ? carrier : null,
@@ -642,7 +669,13 @@ function buildOrders(products: Product[], customers: Customer[], settings: Setti
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
     .map((d, idx) => {
       const number = `YS-${240101 + idx}`;
-      return { ...d, id: `ord_${240101 + idx}`, number, payment: { ...d.payment, reference: `DEMO-PAY-${240101 + idx}` } };
+      return {
+        ...d,
+        id: `ord_${240101 + idx}`,
+        number,
+        payment: { ...d.payment, reference: `DEMO-PAY-${240101 + idx}` },
+        refunds: d.refunds.map((r) => ({ ...r, orderId: `ord_${240101 + idx}` })),
+      };
     });
 }
 
@@ -708,7 +741,7 @@ function buildContent(products: Product[], now: Date): { homepage: Versioned<Hom
   const published = addDays(now, -12).toISOString();
   const home: HomepageContent = {
     announcement: { ...HOMEPAGE_SOURCE.announcement },
-    hero: { ...HOMEPAGE_SOURCE.hero, imageId: 'm_hero', ctaHref: '/shop' },
+    hero: { ...HOMEPAGE_SOURCE.hero, imageId: 'm_hero', ctaHref: '/product/everyday-speckled-mug' },
     featuredCategoryIds: ['ceramics', 'bags', 'jewellery', 'home-decor'],
     featuredProductIds: ordered((p) => p.isFeatured).slice(0, 8),
     bestsellerProductIds: ordered((p) => p.isBestseller).slice(0, 4),

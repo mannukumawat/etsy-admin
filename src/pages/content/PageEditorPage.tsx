@@ -4,7 +4,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { useParams } from 'react-router-dom';
 import { z } from 'zod';
 import { ArrowLeft, Eye, FileQuestion, Plus, RotateCcw, Save, Send, X } from 'lucide-react';
-import { LEGAL_NOTICE_TEXT, PAGE_LABEL, PAGE_PATH, PUBLISH_SIMULATION_TEXT, isPageKey } from '@/components/content/contentMeta';
+import { LEGAL_NOTICE_TEXT, PAGE_LABEL, PAGE_PATH, PUBLISH_LIVE_TEXT, PUBLISH_SIMULATION_TEXT, isPageKey } from '@/components/content/contentMeta';
 import { PagePreview } from '@/components/content/PagePreview';
 import { PublishStatus } from '@/components/content/PublishStatus';
 import { ReorderControls, useReorderFocus } from '@/components/content/ReorderControls';
@@ -19,6 +19,7 @@ import { usePageMeta } from '@/hooks/misc';
 import { invalidate, useQuery } from '@/hooks/useQuery';
 import { ApiError, errorMessage, type FieldIssue } from '@/services/api';
 import { contentService, hasUnpublishedChanges } from '@/services/contentServices';
+import { API_MODE } from '@/api';
 import { confirmAction, toast } from '@/store';
 import type { PageContent, PageDoc, PageKey } from '@/types';
 import { formatDateTime } from '@/utils/dates';
@@ -118,15 +119,15 @@ function PageEditor({ doc: loadedDoc }: { doc: PageDoc }) {
   const publish = async () => {
     const saveFirst = isDirty;
     const ok = await confirmAction({
-      title: `Publish “${doc.draft.title.en || PAGE_LABEL[key]}” (simulated)?`,
+      title: API_MODE ? `Publish “${doc.draft.title.en || PAGE_LABEL[key]}”?` : `Publish “${doc.draft.title.en || PAGE_LABEL[key]}” (simulated)?`,
       body: (
         <div className="space-y-2">
           <p>{saveFirst ? 'Your unsaved edits are saved to the draft first; then the draft becomes the published version.' : 'The saved draft becomes the published version.'}</p>
-          <p>{PUBLISH_SIMULATION_TEXT}</p>
+          <p>{API_MODE ? PUBLISH_LIVE_TEXT : PUBLISH_SIMULATION_TEXT}</p>
           {doc.isLegal && <p className="font-medium text-amber-900">This is sample legal text. Publishing here does not make it reviewed or legally valid.</p>}
         </div>
       ),
-      confirmLabel: 'Publish in admin preview',
+      confirmLabel: API_MODE ? 'Publish' : 'Publish in admin preview',
     });
     if (!ok) return;
     setBusy('publish');
@@ -134,7 +135,7 @@ function PageEditor({ doc: loadedDoc }: { doc: PageDoc }) {
     try {
       if (saveFirst && !(await validateAndSave())) return;
       applySaved(await contentService.publishPage(key));
-      toast('Published in the admin preview only. The storefront is not updated until backend integration.', 'success');
+      toast(API_MODE ? 'Published. The storefront now shows this version.' : 'Published in the admin preview only. The storefront is not updated in demo mode.', 'success');
     } catch (e) {
       if (e instanceof ApiError && e.code === 'validation') setPublishIssues(e.issues);
       applyServerErrors(e, setError, 'Could not publish.');
@@ -146,7 +147,7 @@ function PageEditor({ doc: loadedDoc }: { doc: PageDoc }) {
   const discard = async () => {
     const ok = await confirmAction({
       title: 'Discard draft changes?',
-      body: `The draft goes back to the version published in the admin preview on ${formatDateTime(doc.publishedAt)}. Unsaved edits are lost too. This can’t be undone.`,
+      body: `The draft goes back to the version published ${API_MODE ? '' : 'in the admin preview '}on ${formatDateTime(doc.publishedAt)}. Unsaved edits are lost too. This can’t be undone.`,
       confirmLabel: 'Discard changes',
       tone: 'danger',
     });
@@ -316,8 +317,8 @@ function PageEditor({ doc: loadedDoc }: { doc: PageDoc }) {
               : !doc.published
                 ? 'Draft saved. Not published yet.'
                 : changed
-                  ? 'Draft saved. It differs from the published version (admin preview).'
-                  : 'Draft matches the published version (admin preview).'
+                  ? `Draft saved. It differs from the published version${API_MODE ? '' : ' (admin preview)'}.`
+                  : `Draft matches the published version${API_MODE ? '' : ' (admin preview)'}.`
           }
         >
           {canDiscard && (

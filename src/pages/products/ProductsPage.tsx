@@ -6,6 +6,7 @@ import { Button, ButtonLink } from '@/components/ui/Button';
 import { DataTable, type Column } from '@/components/ui/DataTable';
 import { EmptyState, Notice } from '@/components/ui/Feedback';
 import { FilterBar } from '@/components/ui/FilterBar';
+import { ConfirmDialog } from '@/components/ui/Dialog';
 import { Menu } from '@/components/ui/Menu';
 import { PageHeader } from '@/components/ui/Page';
 import { ProductStatusBadge, StockBadge } from '@/components/ui/StatusBadges';
@@ -15,7 +16,7 @@ import { invalidate, useQuery } from '@/hooks/useQuery';
 import { errorMessage } from '@/services/api';
 import { categoryService } from '@/services/catalogServices';
 import { productService } from '@/services/productService';
-import { downloadImportTemplate, exportProductsExcel, importProductsExcel } from '@/api/products';
+import { downloadImportTemplate, exportProductsExcel, importProductsExcel, type ImportResult } from '@/api/products';
 import { itemGroupsApi } from '@/api';
 import { API_MODE } from '@/api/config';
 import { confirmAction, toast } from '@/store';
@@ -38,6 +39,10 @@ export default function ProductsPage() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkFailures, setBulkFailures] = useState<Array<{ name: string; reason: string }>>([]);
   const [importing, setImporting] = useState(false);
+  const [deleteAllOpen, setDeleteAllOpen] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
+  const filtered = list.activeFilters > 0;
+  const [importReport, setImportReport] = useState<ImportResult | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -45,14 +50,27 @@ export default function ProductsPage() {
     if (!file) return;
     e.target.value = '';
     setImporting(true);
+    setImportReport(null);
     try {
       const result = await importProductsExcel(file);
+      setImportReport(result);
       refresh();
-      toast(`Imported ${result.imported} products, ${result.variants} variants.`, 'success');
+      toast(
+        `Imported ${result.imported} new, updated ${result.updated}, skipped ${result.skipped}.`,
+        result.errors.length ? 'info' : 'success',
+      );
     } catch (err) {
       toast(errorMessage(err), 'error');
     } finally {
       setImporting(false);
+    }
+  };
+
+  const handleDownload = async (fn: () => Promise<void>) => {
+    try {
+      await fn();
+    } catch (err) {
+      toast(errorMessage(err), 'error');
     }
   };
   const threshold = settings?.store.lowStockThreshold ?? 5;
@@ -76,7 +94,9 @@ export default function ProductsPage() {
     });
     if (!ok) return;
     try {
-      const res = await productService.setStatus(ids, status);
+      // L-P1: pass the names from the loaded list so failures are reported by name.
+      const names = Object.fromEntries((data?.items ?? []).map((p) => [p.id, p.name.en]));
+      const res = await productService.setStatus(ids, status, names);
       setBulkFailures(res.failed);
       setSelected(new Set());
       refresh();
@@ -86,19 +106,18 @@ export default function ProductsPage() {
     }
   };
 
+  // H7: deleting the catalogue is destructive, so it needs the word DELETE typed in —
+  // one stray click can no longer wipe the store. When filters are active, only the
+  // filtered set is deleted (the dialog says exactly how many). Media files and
+  // inventory history are kept; order snapshots are untouched.
   const deleteAll = async () => {
-    const ok = await confirmAction({
-      title: 'Delete ALL products?',
-      body: 'This permanently deletes every product, variant, option, image reference and spec. This cannot be undone.',
-      confirmLabel: 'Delete All',
-      tone: 'danger',
-    });
-    if (!ok) return;
     try {
-      await productService.deleteAll();
+      const res = await productService.deleteAll(filtered ? list.query : undefined);
       setSelected(new Set());
+      setDeleteAllOpen(false);
+      setDeleteConfirmText('');
       refresh();
-      toast('All products deleted.', 'success');
+      toast(`${res.deleted} product${res.deleted === 1 ? '' : 's'} deleted.`, 'success');
     } catch (e) {
       toast(errorMessage(e), 'error');
     }
@@ -127,7 +146,7 @@ export default function ProductsPage() {
     });
     if (!ok) return;
     try {
-      await productService.setStatus([p.id], status);
+      await productService.setStatus([p.id], status, { [p.id]: p.name.en });
       refresh();
       toast(archiving ? 'Product archived.' : 'Product restored as draft.', 'success');
     } catch (e) {
@@ -210,40 +229,42 @@ export default function ProductsPage() {
         description="Prices are stored in USD, the base currency. The storefront converts them for shoppers."
         actions={
           <div className="flex items-center gap-2">
-            {API_MODE && (
-              <>
-                <input ref={fileInputRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={handleImport} />
-                <Button
-                  variant="ghost"
-                  icon={<FileSpreadsheet className="h-4 w-4" aria-hidden />}
-                  onClick={downloadImportTemplate}
-                  title="Download blank Excel template with sample data and instructions"
-                >
-                  Download Template
-                </Button>
-                <Button
-                  variant="ghost"
-                  icon={<Upload className="h-4 w-4" aria-hidden />}
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={importing}
-                >
-                  {importing ? 'Importing…' : 'Import Excel'}
-                </Button>
-                <Button
-                  variant="ghost"
-                  icon={<Download className="h-4 w-4" aria-hidden />}
-                  onClick={exportProductsExcel}
-                >
-                  Export Excel
-                </Button>
-              </>
-            )}
+            {/* M-P7: import/export no longer vanish in demo mode — they stay visible but
+             *  disabled, with the reason in the tooltip, so the feature is discoverable. */}
+            <input ref={fileInputRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={handleImport} />
+            <Button
+              variant="ghost"
+              icon={<FileSpreadsheet className="h-4 w-4" aria-hidden />}
+              onClick={() => void handleDownload(downloadImportTemplate)}
+              title={API_MODE ? 'Download blank Excel template with sample data and instructions' : 'Import and export need the live backend — unavailable in demo mode.'}
+              disabled={!API_MODE}
+            >
+              Download Template
+            </Button>
+            <Button
+              variant="ghost"
+              icon={<Upload className="h-4 w-4" aria-hidden />}
+              onClick={() => fileInputRef.current?.click()}
+              disabled={importing || !API_MODE}
+              title={!API_MODE ? 'Import needs the live backend — unavailable in demo mode.' : undefined}
+            >
+              {importing ? 'Importing…' : 'Import Excel'}
+            </Button>
+            <Button
+              variant="ghost"
+              icon={<Download className="h-4 w-4" aria-hidden />}
+              onClick={() => void handleDownload(() => exportProductsExcel(API_MODE ? { q: list.query.q || undefined, status: list.query.filters?.status as ProductStatus | undefined, category: list.query.filters?.category, stock: list.query.filters?.stock as 'in' | 'low' | 'out' | undefined, flag: list.query.filters?.flag as 'featured' | 'bestseller' | 'new' | undefined, itemGroup: list.query.filters?.itemGroup, sort: (list.query.sort ?? 'updated') as 'name' | 'price' | 'stock' | 'updated' | 'order', dir: list.query.dir ?? 'desc' } : {}))}
+              disabled={!API_MODE}
+              title={!API_MODE ? 'Export needs the live backend — unavailable in demo mode.' : undefined}
+            >
+              Export Excel
+            </Button>
             <Button
               variant="danger"
               icon={<Trash2 className="h-4 w-4" aria-hidden />}
-              onClick={() => void deleteAll()}
+              onClick={() => { setDeleteConfirmText(''); setDeleteAllOpen(true); }}
             >
-              Delete All
+              {filtered ? `Delete filtered (${data?.total ?? '…'})` : 'Delete All'}
             </Button>
             <ButtonLink to="/products/new" variant="primary" icon={<PackagePlus className="h-4 w-4" aria-hidden />}>
               Add product
@@ -255,6 +276,33 @@ export default function ProductsPage() {
         <Notice tone="info" className="mb-4">
           Showing products in item group: <strong>{activeItemGroup.nameEn}</strong>
           <Button size="xs" variant="ghost" className="ml-3" onClick={() => list.update({ itemGroup: null })}>Clear filter</Button>
+        </Notice>
+      )}
+      {importReport && (
+        <Notice
+          tone={importReport.errors.length ? 'warning' : 'success'}
+          className="mb-4"
+          title={`Import finished — ${importReport.imported} new, ${importReport.updated} updated, ${importReport.skipped} skipped`}
+          action={
+            <Button size="xs" variant="ghost" onClick={() => setImportReport(null)}>
+              Dismiss
+            </Button>
+          }
+        >
+          <p>
+            {importReport.categories} categor{importReport.categories === 1 ? 'y' : 'ies'} · {importReport.variants} variants. Prices in the file are rupees and were
+            converted to USD at the configured rate. New products are saved as drafts — review and activate them when ready.
+          </p>
+          {importReport.errors.length > 0 && (
+            <ul className="mt-2 max-h-48 list-disc overflow-y-auto pl-4">
+              {importReport.errors.slice(0, 50).map((e, i) => (
+                <li key={`${e.row}-${e.field}-${i}`}>
+                  Row {e.row} — {e.field}: {e.message}
+                </li>
+              ))}
+              {importReport.errors.length > 50 && <li>…and {importReport.errors.length - 50} more rows.</li>}
+            </ul>
+          )}
         </Notice>
       )}
       {bulkFailures.length > 0 && (
@@ -330,6 +378,35 @@ export default function ProductsPage() {
           }
         />
       </div>
+      <ConfirmDialog
+        open={deleteAllOpen}
+        onClose={() => setDeleteAllOpen(false)}
+        title={filtered ? `Delete ${data?.total ?? 'the filtered'} products?` : 'Delete ALL products?'}
+        confirmLabel={filtered ? 'Delete filtered products' : 'Delete All'}
+        tone="danger"
+        disabled={deleteConfirmText.trim() !== 'DELETE'}
+        onConfirm={() => void deleteAll()}
+      >
+        <p>
+          {filtered
+            ? `This permanently deletes the ${data?.total ?? ''} products matching the current filters — variants, options, image references and specs included.`
+            : 'This permanently deletes every product, variant, option, image reference and spec.'}{' '}
+          Media files are kept, inventory history is kept, and order snapshots are untouched. This cannot be undone.
+        </p>
+        <p className="mt-2">
+          Export the catalogue first if you want a backup — use the “Export Excel” button above.
+        </p>
+        <label className="mt-3 block text-[13px] font-medium text-ink">
+          Type <span className="font-mono font-semibold">DELETE</span> to confirm
+          <input
+            value={deleteConfirmText}
+            onChange={(e) => setDeleteConfirmText(e.target.value)}
+            placeholder="DELETE"
+            autoComplete="off"
+            className="mt-1 block w-full rounded-lg border border-sand-300 bg-white px-3 py-2 text-sm text-ink outline-none focus:border-brand-500"
+          />
+        </label>
+      </ConfirmDialog>
     </>
   );
 }

@@ -1,14 +1,15 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { EyeOff, RotateCcw, SearchX, Star } from 'lucide-react';
-import { reviewsApi, productsApi, type AdminReview } from '@/api';
+import { EyeOff, RotateCcw, Search, SearchX, Star, X } from 'lucide-react';
+import { reviewsApi, type AdminReview } from '@/api';
+import { productService } from '@/services/productService';
 import { Button } from '@/components/ui/Button';
 import { DataTable, type Column } from '@/components/ui/DataTable';
 import { ConfirmDialog } from '@/components/ui/Dialog';
 import { Badge, EmptyState, Notice } from '@/components/ui/Feedback';
 import { FilterBar } from '@/components/ui/FilterBar';
 import { PageHeader } from '@/components/ui/Page';
-import { usePageMeta } from '@/hooks/misc';
+import { useDebounced, usePageMeta } from '@/hooks/misc';
 import { useListParams } from '@/hooks/useListParams';
 import { invalidate, useQuery } from '@/hooks/useQuery';
 import { errorMessage } from '@/services/api';
@@ -69,12 +70,92 @@ function ModerateDialog({ review, onClose }: { review: AdminReview; onClose: () 
   );
 }
 
+/**
+ * M-O15: searchable product filter. The old version loaded the whole product list
+ * into one dropdown (unbounded); this one searches the server as you type (max 8
+ * matches) and fetches only the single selected product to show its name.
+ */
+function ProductFilter({ productId, onSelect }: { productId?: string; onSelect: (id: string | null) => void }) {
+  const [text, setText] = useState('');
+  const [open, setOpen] = useState(false);
+  const debounced = useDebounced(text, 300);
+  const boxRef = useRef<HTMLDivElement>(null);
+
+  // The selected product's name (for a URL-shared filter, e.g. after refresh).
+  const selected = useQuery(productId ? `product:${productId}` : null, () => productService.get(productId!));
+  const matches = useQuery(
+    debounced.trim() && !productId ? `reviews:product-search:${debounced.trim()}` : null,
+    () => productService.list({ q: debounced.trim(), page: 1, pageSize: 8 }),
+  );
+
+  useEffect(() => {
+    const onDoc = (e: MouseEvent) => {
+      if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, []);
+
+  const options = matches.data?.items ?? [];
+
+  return (
+    <div ref={boxRef} className="relative">
+      {productId ? (
+        <span className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-brand-600 bg-brand-50/40 px-2.5 text-[13px] font-medium text-ink">
+          Product: {selected.data?.name.en ?? '…'}
+          <button
+            type="button"
+            aria-label="Clear product filter"
+            className="rounded p-0.5 text-ink-muted hover:text-ink"
+            onClick={() => { onSelect(null); setText(''); }}
+          >
+            <X className="h-3.5 w-3.5" aria-hidden />
+          </button>
+        </span>
+      ) : (
+        <>
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ink-faint" aria-hidden />
+            <input
+              type="search"
+              value={text}
+              onChange={(e) => { setText(e.target.value); setOpen(true); }}
+              onFocus={() => setOpen(true)}
+              placeholder="Filter by product…"
+              aria-label="Filter by product"
+              className="input h-9 w-48 pl-8 text-[13px]"
+            />
+          </div>
+          {open && debounced.trim() && (
+            <ul className="absolute z-20 mt-1 max-h-64 w-72 overflow-auto rounded-lg border border-sand-200 bg-white py-1 shadow-lg">
+              {matches.isLoading && <li className="px-3 py-2 text-xs text-ink-muted">Searching…</li>}
+              {!matches.isLoading && options.length === 0 && (
+                <li className="px-3 py-2 text-xs text-ink-muted">No products match “{debounced.trim()}”.</li>
+              )}
+              {options.map((p) => (
+                <li key={p.id}>
+                  <button
+                    type="button"
+                    className="block w-full px-3 py-2 text-left text-[13px] text-ink hover:bg-sand-50"
+                    onClick={() => { onSelect(p.id); setText(''); setOpen(false); }}
+                  >
+                    {p.name.en}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function ReviewsPage() {
   usePageMeta('Reviews', [{ label: 'Sales' }]);
   const list = useListParams(['status', 'rating', 'productId', 'from', 'to'], { sort: 'newest' });
   const [moderating, setModerating] = useState<AdminReview | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
-  const products = useQuery('reviews:products', () => productsApi.fetchProducts());
   const f = list.query.filters ?? {};
   const { data, isLoading, isFetching, error, refetch } = useQuery(
     `reviews:list:${list.key}`,
@@ -207,13 +288,13 @@ export default function ReviewsPage() {
           filters={[
             { key: 'status', label: 'Status', options: [{ value: 'published', label: 'Published' }, { value: 'hidden', label: 'Hidden' }] },
             { key: 'rating', label: 'Rating', options: [5, 4, 3, 2, 1].map((n) => ({ value: String(n), label: `${n} star${n === 1 ? '' : 's'}` })) },
-            { key: 'productId', label: 'Product', options: (products.data ?? []).map((p) => ({ value: p.id, label: p.name.en })) },
           ]}
           values={f}
           onFilter={(k, v) => list.update({ [k]: v })}
           activeCount={list.activeFilters}
           onClear={list.clear}
         >
+          <ProductFilter productId={f.productId} onSelect={(id) => list.update({ productId: id })} />
           <label className="flex items-center gap-1 text-xs text-ink-muted">
             From
             <input type="date" value={f.from ?? ''} max={f.to} onChange={(e) => list.update({ from: e.target.value })} className="input h-9 w-36 py-1" />

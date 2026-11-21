@@ -16,7 +16,7 @@ import { usePageMeta, useSettings } from '@/hooks/misc';
 import { invalidate, useQuery } from '@/hooks/useQuery';
 import { ApiError, errorMessage } from '@/services/api';
 import { categoryService } from '@/services/catalogServices';
-import { itemGroupsApi, navLinksApi } from '@/api';
+import { API_MODE, collectionsApi, itemGroupsApi, navLinksApi, productsApi } from '@/api';
 import { mediaService } from '@/services/contentServices';
 import { productService } from '@/services/productService';
 import { confirmAction, toast } from '@/store';
@@ -46,6 +46,11 @@ const schema = z.object({
   categoryId: z.string().min(1, 'Choose a category.'),
   itemGroupId: z.string().nullable().optional(),
   navLinkId: z.string().nullable().optional(),
+  /** M-P1: collection assignment + barcode + cost price (internal only — the
+   *  storefront never sees cost price). Cost is edited in major USD like basePrice. */
+  collectionId: z.string().nullable().optional(),
+  barcode: z.string().trim().max(64, 'At most 64 characters.'),
+  costPrice: optionalMoney,
   tagsText: z.string().max(700),
   basePrice: money,
   baseSalePrice: optionalMoney,
@@ -94,7 +99,7 @@ const L = () => ({ en: '' });
 function blankForm(): ProductForm {
   return {
     name: L(), shortDescription: L(), description: L(), materials: L(), care: L(),
-    slug: '', categoryId: '', itemGroupId: null, navLinkId: null, tagsText: '', basePrice: 0, baseSalePrice: null, images: [], options: [],
+    slug: '', categoryId: '', itemGroupId: null, navLinkId: null, collectionId: null, barcode: '', costPrice: null, tagsText: '', basePrice: 0, baseSalePrice: null, images: [], options: [],
     variants: [{ id: newId('var'), sku: '', options: {}, price: 0, salePrice: null, stock: 0, imageIds: [], isNew: true }],
     weight: { value: null, unit: 'g' }, dimensions: { length: null, width: null, height: null, unit: 'cm' }, specs: [],
     returnsAllowed: true, exchangeAllowed: true, returnDays: 30,
@@ -105,7 +110,7 @@ function blankForm(): ProductForm {
 function toForm(p: Product): ProductForm {
   return {
     name: p.name, shortDescription: p.shortDescription, description: p.description, materials: p.materials, care: p.care,
-    slug: p.slug, categoryId: p.categoryId, itemGroupId: p.itemGroupId ?? null, navLinkId: p.navLinkId ?? null, tagsText: p.tags.join(', '),
+    slug: p.slug, categoryId: p.categoryId, itemGroupId: p.itemGroupId ?? null, navLinkId: p.navLinkId ?? null, collectionId: p.collectionId ?? null, barcode: p.barcode ?? '', costPrice: p.costPrice === null || p.costPrice === undefined ? null : toMajor(p.costPrice), tagsText: p.tags.join(', '),
     basePrice: toMajor(p.basePrice), baseSalePrice: p.baseSalePrice === null ? null : toMajor(p.baseSalePrice),
     images: p.images, options: p.options,
     variants: p.variants.map((v) => ({ ...v, price: toMajor(v.price), salePrice: v.salePrice === null ? null : toMajor(v.salePrice), isNew: false })),
@@ -118,7 +123,7 @@ function toForm(p: Product): ProductForm {
 function fromForm(v: ProductForm): ProductInput {
   return {
     name: v.name, shortDescription: v.shortDescription, description: v.description, materials: v.materials, care: v.care,
-    slug: v.slug.trim(), categoryId: v.categoryId, itemGroupId: v.itemGroupId ?? null, navLinkId: v.navLinkId ?? null,
+    slug: v.slug.trim(), categoryId: v.categoryId, itemGroupId: v.itemGroupId ?? null, navLinkId: v.navLinkId ?? null, collectionId: v.collectionId ?? null, barcode: v.barcode.trim() ? v.barcode.trim() : null, costPrice: v.costPrice === null ? null : toMinor(v.costPrice),
     tags: v.tagsText.split(',').map((t) => t.trim()).filter(Boolean),
     basePrice: toMinor(v.basePrice), baseSalePrice: v.baseSalePrice === null ? null : toMinor(v.baseSalePrice),
     images: v.images, options: v.options,
@@ -149,14 +154,23 @@ function collectMessages(errors: FieldErrors, prefix = ''): string[] {
 
 function PricePreview({ usdMajor }: { usdMajor: number | null }) {
   const { data: settings } = useSettings();
-  if (!settings || usdMajor === null || !Number.isFinite(usdMajor) || usdMajor <= 0) return null;
+  // L-P4: a $0 draft used to show no conversion hint at all. Show the preview for
+  // $0 too (the conversions are all zero, which is itself useful to see), and label
+  // the rates accurately — "manual" only when every shown currency is manual.
+  if (!settings || usdMajor === null || !Number.isFinite(usdMajor) || usdMajor < 0) return null;
   const others = settings.currencies.currencies.filter((c) => c.enabled && c.code !== 'USD');
+  if (!others.length) return null;
+  const rateKind = others.every((c) => !c.autoRate) ? 'manual' : others.every((c) => c.autoRate) ? 'live' : 'current';
   return (
     <p className="mt-1 text-xs text-ink-muted">
-      ≈ {others.map((c) => formatWithCode(convertFromUsd(toMinor(usdMajor), c), c.code, c.fractionDigits)).join(' · ')} <span className="text-ink-faint">(current manual rates)</span>
+      ≈ {others.map((c) => formatWithCode(convertFromUsd(toMinor(usdMajor), c), c.code, c.fractionDigits)).join(' · ')} <span className="text-ink-faint">({rateKind === 'current' ? 'at current rates' : `at current ${rateKind} rates`})</span>
     </p>
   );
 }
+
+/** M-P6: the backend caps product images at 20 — the editor enforces the same cap
+ *  client-side instead of letting the save fail with a server error. */
+const MAX_PRODUCT_IMAGES = 20;
 
 function ImagesSection() {
   const { control } = useFormContext<ProductForm>();
@@ -167,12 +181,25 @@ function ImagesSection() {
   const [urlBusy, setUrlBusy] = useState(false);
   const [urlError, setUrlError] = useState('');
   const variants = useWatch({ control, name: 'variants' });
+  const atCap = fields.length >= MAX_PRODUCT_IMAGES;
+
+  const addImages = (ids: string[]) => {
+    const existing = new Set(fields.map((f) => f.mediaId));
+    const fresh = ids.filter((id) => !existing.has(id));
+    const room = MAX_PRODUCT_IMAGES - fields.length;
+    const added = fresh.slice(0, room);
+    added.forEach((id) => append({ mediaId: id, alt: map.get(id)?.alt ?? { en: '' } }));
+    if (fresh.length > added.length) {
+      toast(`Only ${added.length} image${added.length === 1 ? '' : 's'} added — a product can have at most ${MAX_PRODUCT_IMAGES} images.`, 'info');
+    }
+  };
+
   return (
     <Card
-      title="Images"
+      title={`Images (${fields.length}/${MAX_PRODUCT_IMAGES})`}
       description="The first image is the primary image. Alt text describes the photo for screen readers and SEO."
       actions={
-        <Button size="sm" variant="outline" icon={<ImagePlus className="h-4 w-4" aria-hidden />} onClick={() => setPicking(true)}>
+        <Button size="sm" variant="outline" disabled={atCap} title={atCap ? `At most ${MAX_PRODUCT_IMAGES} images per product.` : undefined} icon={<ImagePlus className="h-4 w-4" aria-hidden />} onClick={() => setPicking(true)}>
           Add images
         </Button>
       }
@@ -192,14 +219,15 @@ function ImagesSection() {
             type="button"
             variant="outline"
             loading={urlBusy}
-            disabled={!imageUrl.trim()}
+            disabled={!imageUrl.trim() || atCap}
+            title={atCap ? `At most ${MAX_PRODUCT_IMAGES} images per product.` : undefined}
             onClick={async () => {
               setUrlBusy(true);
               setUrlError('');
               try {
                 const asset = await mediaService.importUrl(imageUrl.trim());
                 invalidate('media');
-                append({ mediaId: asset.id, alt: asset.alt });
+                addImages([asset.id]);
                 setImageUrl('');
                 toast('Image URL added to this product.', 'success');
               } catch (error) {
@@ -214,6 +242,11 @@ function ImagesSection() {
         </div>
         <p className="mt-1 text-xs text-ink-muted">Paste a direct public URL to a JPEG, PNG, WebP or GIF image.</p>
       </div>
+      {atCap && (
+        <p className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] text-amber-900" role="status">
+          This product already has {MAX_PRODUCT_IMAGES} images — remove one to add another.
+        </p>
+      )}
       {fields.length === 0 ? (
         <EmptyState icon={<ImagePlus className="h-6 w-6" aria-hidden />} title="No images yet" body="Active products need at least one image." className="py-6" />
       ) : (
@@ -260,8 +293,7 @@ function ImagesSection() {
           title="Add product images"
           onClose={() => setPicking(false)}
           onSelect={(ids) => {
-            const existing = new Set(fields.map((f) => f.mediaId));
-            ids.filter((id) => !existing.has(id)).forEach((id) => append({ mediaId: id, alt: map.get(id)?.alt ?? { en: '' } }));
+            addImages(ids);
           }}
         />
       )}
@@ -339,7 +371,9 @@ function OptionsAndVariants({ productId, savedVariantIds }: { productId: string;
       isNew: !savedVariantIds.has(x.id),
     }));
     const kept = new Set(next.map((x) => x.id));
-    const removed = current.filter((x) => !kept.has(x.id) && x.stock > 0).map((x) => ({ sku: x.sku, stock: x.stock }));
+    // M-P3: list EVERY removed variant in the confirm dialog — the old code only
+    // listed ones with stock > 0, so zero-stock variants vanished without a trace.
+    const removed = current.filter((x) => !kept.has(x.id)).map((x) => ({ sku: x.sku, stock: x.stock }));
     const apply = () => setValue('variants', next as ProductForm['variants'], { shouldDirty: true, shouldValidate: formState.isSubmitted });
     if (removed.length) setPendingSync({ removed, apply });
     else apply();
@@ -476,7 +510,7 @@ function OptionsAndVariants({ productId, savedVariantIds }: { productId: string;
       <ConfirmDialog
         open={!!pendingSync}
         onClose={() => setPendingSync(null)}
-        title="Remove variants that still have stock?"
+        title="Remove these variants?"
         confirmLabel="Update variants"
         tone="danger"
         onConfirm={() => {
@@ -484,7 +518,7 @@ function OptionsAndVariants({ productId, savedVariantIds }: { productId: string;
           setPendingSync(null);
         }}
       >
-        <p className="text-sm text-ink-soft">These combinations no longer exist, so their variants and stock will be removed when you save:</p>
+        <p className="text-sm text-ink-soft">These combinations no longer exist, so their variants will be removed when you save (stock is lost with them):</p>
         <ul className="mt-2 list-disc pl-5 text-sm">
           {pendingSync?.removed.map((r) => (
             <li key={r.sku}>
@@ -528,13 +562,51 @@ function Editor({ product }: { product: Product | null }) {
   const idRef = useRef(product?.id ?? newId('new'));
   const { data: categories } = useQuery('categories', () => categoryService.list());
   const { data: itemGroups } = useQuery('item-groups', () => itemGroupsApi.fetchItemGroups());
+  const { data: collections } = useQuery('collections', () => collectionsApi.fetchCollections());
   const { data: navLinks } = useQuery('nav-links', () => navLinksApi.fetchNavLinks());
   const { data: all } = useQuery('products:all', () => productService.all());
   const form = useForm<ProductForm>({ resolver: zodResolver(schema), defaultValues: product ? toForm(product) : blankForm(), mode: 'onSubmit' });
-  const { register, handleSubmit, setError, setValue, control, formState, reset, getValues } = form;
+  const { register, handleSubmit, setError, clearErrors, setValue, control, formState, reset, getValues } = form;
   const [issues, setIssues] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [slugTouched, setSlugTouched] = useState(!!product);
+  const slugCheckRef = useRef(0);
+
+  // M-P4: the router blocker only covers in-app navigation — a tab close or refresh
+  // needs the native beforeunload prompt too.
+  useEffect(() => {
+    if (!formState.isDirty || saving) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [formState.isDirty, saving]);
+
+  // M-P2: live slug check on blur — the save-time check (below) stays authoritative,
+  // but the editor no longer waits until save to report a taken slug.
+  const checkSlug = async () => {
+    if (!API_MODE) return;
+    const slug = getValues('slug').trim();
+    if (!SLUG_RE.test(slug)) return; // zod flags it on save
+    if (product && slug === product.slug) {
+      if (formState.errors.slug?.type === 'server') clearErrors('slug');
+      return;
+    }
+    const id = ++slugCheckRef.current;
+    try {
+      const availability = await productsApi.checkAvailability({ slug, excludeId: product?.id });
+      if (slugCheckRef.current !== id) return;
+      if (!availability.slugAvailable) {
+        setError('slug', { type: 'server', message: `Slug already used by “${availability.slugUsedBy ?? 'another product'}”.` });
+      } else if (formState.errors.slug?.type === 'server') {
+        clearErrors('slug');
+      }
+    } catch {
+      // A failed live check is not an error — the save-time check is authoritative.
+    }
+  };
   const nameEn = useWatch({ control, name: 'name.en' });
   const basePrice = useWatch({ control, name: 'basePrice' });
   const salePrice = useWatch({ control, name: 'baseSalePrice' });
@@ -564,6 +636,29 @@ function Editor({ product }: { product: Product | null }) {
           toast(intent === 'active' ? 'This product cannot be activated yet.' : 'Please fix the highlighted fields.', 'error');
           return;
         }
+        // H16: the client-side list is paged, so slug/SKU uniqueness is re-checked on the
+        // server before saving — this is the check that cannot miss a clash on another page.
+        if (API_MODE) {
+          const availability = await productsApi.checkAvailability({
+            slug: input.slug,
+            skus: input.variants.map((v) => v.sku),
+            excludeId: product?.id,
+          });
+          const serverIssues: Issue[] = [];
+          if (!availability.slugAvailable) {
+            serverIssues.push({ path: 'slug', message: `Slug already used by “${availability.slugUsedBy ?? 'another product'}”.` });
+          }
+          for (const clash of availability.skuClashes) {
+            const idx = input.variants.findIndex((v) => v.sku.toUpperCase() === clash.sku.toUpperCase());
+            serverIssues.push({ path: `variants.${Math.max(idx, 0)}.sku`, message: `SKU already used by “${clash.usedBy}”.` });
+          }
+          if (serverIssues.length) {
+            serverIssues.forEach((i, idx) => setError(formPath(i.path) as never, { type: 'server', message: i.message }, { shouldFocus: idx === 0 }));
+            setIssues(serverIssues.map((i) => i.message));
+            toast('Please fix the highlighted fields.', 'error');
+            return;
+          }
+        }
         setSaving(true);
         try {
           const saved = product ? await productService.update(product.id, input, intent) : await productService.create(input, intent);
@@ -572,7 +667,7 @@ function Editor({ product }: { product: Product | null }) {
           toast(intent === 'active' ? (product?.status === 'active' ? 'Product saved.' : 'Product activated.') : intent === 'archived' ? 'Product saved (archived).' : 'Draft saved.', 'success');
           if (!product) navigate(`/products/${saved.id}/edit`, { replace: true });
         } catch (e) {
-          if (e instanceof ApiError && e.code === 'validation') {
+          if (e instanceof ApiError && (e.code === 'validation' || e.code === 'conflict')) {
             e.issues.forEach((i, idx) => setError(formPath(i.path) as never, { type: 'server', message: i.message }, { shouldFocus: idx === 0 }));
             setIssues(e.issues.map((i) => i.message));
             toast(e.message, 'error');
@@ -582,7 +677,10 @@ function Editor({ product }: { product: Product | null }) {
         }
       },
       (errors) => {
-        setIssues(collectMessages(errors).slice(0, 12));
+        // L-P2: the summary used to silently drop every message past the 12th.
+        // Show the first 12 plus a "+N more" count so nothing is hidden.
+        const all = collectMessages(errors);
+        setIssues(all.length > 12 ? [...all.slice(0, 12), `+${all.length - 12} more — see the highlighted fields.`] : all);
         toast('Please fix the highlighted fields.', 'error');
       },
     )();
@@ -635,8 +733,14 @@ function Editor({ product }: { product: Product | null }) {
                     prefix="/product/"
                     className="pl-[4.75rem]"
                     error={formState.errors.slug?.message}
-                    hint="Lowercase letters, numbers and hyphens. Must be unique."
-                    {...register('slug', { onChange: () => setSlugTouched(true) })}
+                    hint="Lowercase letters, numbers and hyphens. Must be unique — checked as you leave this field."
+                    {...register('slug', {
+                      onChange: () => {
+                        setSlugTouched(true);
+                        if (formState.errors.slug?.type === 'server') clearErrors('slug');
+                      },
+                      onBlur: () => void checkSlug(),
+                    })}
                   />
                 </div>
               </Card>
@@ -678,6 +782,14 @@ function Editor({ product }: { product: Product | null }) {
                       <option key={g.id} value={g.id}>{g.nameEn}</option>
                     ))}
                   </SelectField>
+                  <SelectField id="collection" label="Collection" hint="Curated collection pages group products by theme." error={formState.errors.collectionId?.message} {...register('collectionId')}>
+                    <option value="">None</option>
+                    {(collections ?? []).filter((c) => c.status === 'published').map((c) => (
+                      <option key={c.id} value={c.id}>{c.title.en}</option>
+                    ))}
+                  </SelectField>
+                  <TextField id="barcode" label="Barcode" hint="EAN / UPC for stock-taking. Optional." error={formState.errors.barcode?.message} {...register('barcode')} />
+                  <TextField id="cost" label="Cost price" prefix="USD" type="number" step="0.01" min={0} hint="Internal only — never shown on the storefront." error={formState.errors.costPrice?.message} {...register('costPrice', { setValueAs: numOrNull })} />
                   <SelectField id="nav-link" label="Nav Link" error={formState.errors.navLinkId?.message} {...register('navLinkId')}>
                     <option value="">None</option>
                     {(navLinks ?? []).filter((l) => l.isActive).map((l) => (

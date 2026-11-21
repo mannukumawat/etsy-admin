@@ -1,6 +1,8 @@
 import { useState, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, ArrowRight } from 'lucide-react';
+import { mediaUrl } from '@/api';
+import { useMediaMap } from '@/components/media/MediaPicker';
 import { Button } from '@/components/ui/Button';
 import { ErrorState, Notice, Spinner } from '@/components/ui/Feedback';
 import { Card } from '@/components/ui/Page';
@@ -9,6 +11,7 @@ import { useQuery, invalidate } from '@/hooks/useQuery';
 import { errorMessage } from '@/services/api';
 import { toast } from '@/store';
 import { formatDateTime } from '@/utils/dates';
+import { formatWithCode } from '@/utils/money';
 import { cn } from '@/utils/misc';
 import {
   fetchReturn,
@@ -19,6 +22,7 @@ import {
   receiveReturn,
   inspectReturn,
   processRefund,
+  verifyRefund,
   addReturnNote,
   type AdminReturn,
 } from '@/api/returns';
@@ -91,7 +95,7 @@ function ApprovePanel({ ret, onDone }: { ret: AdminReturn; onDone: () => void })
         <input type="number" min={1} max={ret.requestedQty} value={approvedQty} onChange={(e) => setApprovedQty(e.target.value)} className="input w-full" />
       </div>
       <div>
-        <label className="label">Return shipping fee (minor units, 0 = store pays)</label>
+        <label className="label">Return shipping fee ({ret.currency ?? 'USD'} minor units, 0 = store pays)</label>
         <input type="number" min={0} value={shippingFee} onChange={(e) => setShippingFee(e.target.value)} className="input w-full" />
       </div>
       <div>
@@ -299,7 +303,14 @@ function RefundPanel({ ret, onDone }: { ret: AdminReturn; onDone: () => void }) 
     setBusy(true); setErr('');
     try {
       await processRefund(ret.id, { amount: Number(amount), method, reference: reference || undefined, note: note || undefined });
-      toast('Refund recorded.', 'success');
+      toast(
+        method === 'original'
+          ? 'Refund issued via the payment provider.'
+          : method === 'store_credit'
+            ? 'Refund credited to the customer wallet.'
+            : 'Manual refund recorded as pending — verify it once the money has been sent.',
+        'success',
+      );
       onDone();
     } catch (e) { setErr(errorMessage(e)); }
     finally { setBusy(false); }
@@ -309,7 +320,7 @@ function RefundPanel({ ret, onDone }: { ret: AdminReturn; onDone: () => void }) 
     <div className="space-y-3">
       <h4 className="text-sm font-semibold text-ink">Process refund</h4>
       <div>
-        <label className="label">Amount (minor units, max {ret.refundableAmount})</label>
+        <label className="label">Amount ({ret.currency ?? 'USD'} minor units, max {formatWithCode(ret.refundableAmount, ret.currency ?? 'USD')})</label>
         <input type="number" min={1} max={ret.refundableAmount} value={amount} onChange={(e) => setAmount(e.target.value)} className="input w-full" />
       </div>
       <div>
@@ -365,6 +376,22 @@ function ActionPanel({ ret, onDone }: { ret: AdminReturn; onDone: () => void }) 
   if (s === 'inspected') {
     return <Card title="Actions"><RefundPanel ret={ret} onDone={onDone} /></Card>;
   }
+  // L-O5: the terminal states used to render nothing here, leaving the owner to
+  // guess whether anything could still be done. Say so explicitly.
+  const guidance: Record<string, string> = {
+    rejected: 'This return was rejected, so the customer keeps the item and no refund is due. There is nothing left to do on this return.',
+    withdrawn: 'The customer withdrew this return. There is nothing left to do on this return.',
+    closed: 'This return is closed. There is nothing left to do on this return.',
+    refunded: 'The refund for this return is complete — see the timeline and the refund card for the details. There is nothing left to do on this return.',
+  };
+  if (guidance[s]) {
+    return (
+      <Card title="Actions">
+        <p className="text-[13px] text-ink-soft">{guidance[s]}</p>
+        <p className="mt-2 text-[13px] text-ink-soft">You can still add an internal note below for the record.</p>
+      </Card>
+    );
+  }
   return null;
 }
 
@@ -412,6 +439,11 @@ export default function ReturnDetailPage() {
   usePageMeta('Return', [{ label: 'Sales' }, { label: 'Returns', to: '/returns' }]);
 
   const { data: ret, isLoading, error, refetch } = useQuery(`return:${id}`, () => fetchReturn(id));
+  // H10: resolve photo ids to real URLs. The media map holds the stored URL in both
+  // modes (demo blob URLs and live Cloudinary URLs); mediaUrl(id) is the live-mode
+  // fallback for media the list has not loaded yet. The old `/media/:id` relative
+  // links pointed at a route that does not exist in the admin.
+  const { map: mediaMap } = useMediaMap();
 
   const reload = () => {
     invalidate(`return:${id}`, 'returns:list:');
@@ -445,7 +477,7 @@ export default function ReturnDetailPage() {
               <span className={cn('rounded-full px-2.5 py-0.5 font-medium border', i <= reachedStep ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-sand-100 border-sand-200 text-ink-muted')}>
                 {STATUS_LABELS[step] ?? step}
               </span>
-              {i < STEPS.length - 1 && <span className="text-ink-faint">→</span>}
+              {i < STEPS.length - 1 && <ArrowRight className="h-3.5 w-3.5 text-ink-faint" aria-hidden />}
             </span>
           ))}
         </div>
@@ -463,8 +495,8 @@ export default function ReturnDetailPage() {
               {ret.acceptedQty != null && <Field label="Accepted qty" value={ret.acceptedQty} />}
               {ret.restockQty != null && <Field label="Restocked qty" value={ret.restockQty} />}
               <Field label="Return window" value={`${ret.returnWindowDays} days`} />
-              <Field label="Refundable amount" value={`${ret.refundableAmount} (minor units)`} />
-              {ret.shippingFee > 0 && <Field label="Return shipping fee" value={`${ret.shippingFee} (minor units)`} />}
+              <Field label="Refundable amount" value={formatWithCode(ret.refundableAmount, ret.currency ?? 'USD')} />
+              {ret.shippingFee > 0 && <Field label="Return shipping fee" value={formatWithCode(ret.shippingFee, ret.currency ?? 'USD')} />}
             </div>
             {ret.customerNote && (
               <div className="mt-4">
@@ -482,11 +514,14 @@ export default function ReturnDetailPage() {
               <div className="mt-4">
                 <p className="text-xs font-semibold text-ink-muted uppercase tracking-wide mb-2">Customer photos</p>
                 <div className="flex flex-wrap gap-2">
-                  {ret.photos.map((photoId) => (
-                    <a key={photoId} href={`/media/${photoId}`} target="_blank" rel="noopener noreferrer" className="h-16 w-16 rounded-lg border border-sand-200 overflow-hidden block hover:border-brand-400">
-                      <img src={`/media/${photoId}`} alt="Return photo" className="h-full w-full object-cover" />
-                    </a>
-                  ))}
+                  {ret.photos.map((photoId) => {
+                    const url = mediaMap.get(photoId)?.url ?? mediaUrl(photoId);
+                    return (
+                      <a key={photoId} href={url} target="_blank" rel="noopener noreferrer" title="Open full photo" className="h-16 w-16 rounded-lg border border-sand-200 overflow-hidden block hover:border-brand-400">
+                        <img src={url} alt="Return photo" className="h-full w-full object-cover" />
+                      </a>
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -510,7 +545,7 @@ export default function ReturnDetailPage() {
           {ret.refund && (
             <Card title="Refund">
               <div className="grid gap-4 sm:grid-cols-2">
-                <Field label="Amount" value={`${ret.refund.amount} (minor units)`} />
+                <Field label="Amount" value={formatWithCode(ret.refund.amount, ret.currency ?? 'USD')} />
                 <Field label="Method" value={ret.refund.method} />
                 <Field label="Status" value={ret.refund.status} />
                 {ret.refund.reference && <Field label="Reference / UTR" value={<span className="font-mono">{ret.refund.reference}</span>} />}
@@ -519,9 +554,36 @@ export default function ReturnDetailPage() {
                 {ret.refund.failedAt && <Field label="Failed" value={formatDateTime(ret.refund.failedAt)} />}
                 {ret.refund.note && <Field label="Notes" value={ret.refund.note} />}
               </div>
+              {ret.refund.method.startsWith('manual_') && ret.refund.status === 'pending' && (
+                <div className="mt-3 space-y-2">
+                  <Notice tone="warning">
+                    Recorded as pending — the order totals have not moved yet. Verify it once the money has actually arrived.
+                  </Notice>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={async () => {
+                      try {
+                        await verifyRefund(ret.id);
+                        toast('Refund verified.', 'success');
+                        await refetch();
+                      } catch (e) {
+                        toast(errorMessage(e), 'error');
+                      }
+                    }}
+                  >
+                    Mark as verified
+                  </Button>
+                </div>
+              )}
               {ret.refund.method.startsWith('manual_') && ret.refund.status === 'completed' && (
                 <Notice tone="info" className="mt-3">
-                  Manually recorded — not verified by a payment provider.
+                  Manually recorded and verified — the money was confirmed received before the order totals moved.
+                </Notice>
+              )}
+              {ret.refund.status === 'processing' && (
+                <Notice tone="info" className="mt-3">
+                  The payment provider has accepted this refund; the order totals will update once it settles.
                 </Notice>
               )}
             </Card>

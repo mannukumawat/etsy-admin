@@ -52,3 +52,15 @@ export function fetchCustomerWallet(customerId: string, page = 1, signal?: Abort
 export function fetchCustomerTopups(customerId: string, page = 1, signal?: AbortSignal): Promise<AdminWalletTopupList> {
   return apiClient.get<AdminWalletTopupList>(`/api/admin/wallet/topups/${encodeURIComponent(customerId)}`, { query: { page }, signal });
 }
+
+/** M-O7: owner wallet adjustment (credit/debit with a reason). Recorded as an
+ *  `admin-adjust:` ledger row + audit-log entry; NOT a Razorpay top-up. */
+export function adjustCustomerWallet(
+  customerId: string,
+  input: { direction: 'credit' | 'debit'; amountPaise: number; note: string },
+): Promise<{ customerId: string; balancePaise: number; txId: string; reference: string }> {
+  return apiClient.post<{ customerId: string; balancePaise: number; txId: string; reference: string }>(
+    `/api/admin/wallet/customers/${encodeURIComponent(customerId)}/adjust`,
+    input,
+  );
+}

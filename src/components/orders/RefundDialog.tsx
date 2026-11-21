@@ -11,7 +11,7 @@ import { PaymentBadge } from '@/components/ui/StatusBadges';
 import { ApiError, errorMessage } from '@/services/api';
 import { orderService } from '@/services/salesServices';
 import { toast } from '@/store';
-import type { Order } from '@/types';
+import type { Order, RefundMethod } from '@/types';
 import { applyServerErrors } from '@/utils/forms';
 import { formatWithCode, toMinor } from '@/utils/money';
 import { paymentAfterRefund, refundableAmount } from '@/utils/orderRules';
@@ -35,6 +35,13 @@ function parseAmount(raw: string, digits: number, max: number, currency: string)
   return { minor };
 }
 
+const METHOD_LABELS: Array<{ value: RefundMethod; label: string; hint: string }> = [
+  { value: 'original', label: 'Original payment', hint: 'Refunded through the payment provider, in the order’s currency.' },
+  { value: 'manual_bank', label: 'Manual bank transfer', hint: 'Recorded as pending until you verify it with the bank reference.' },
+  { value: 'manual_upi', label: 'Manual UPI', hint: 'Recorded as pending until you verify it with the UPI reference.' },
+  { value: 'store_credit', label: 'Store credit (wallet)', hint: 'Credited to the customer’s wallet straight away.' },
+];
+
 export function RefundDialog(props: Props) {
   if (!props.open) return null;
   return <RefundDialogInner {...props} />;
@@ -45,6 +52,10 @@ function RefundDialogInner({ onClose, order }: Props) {
   const [formError, setFormError] = useState<string | null>(null);
   const max = refundableAmount(order);
   const digits = fractionDigitsFor(order.currency);
+  // A refund can only go back through the provider when the original payment id was stored.
+  const canOriginal = order.payment.method !== 'wallet' && order.payment.reference !== '';
+  const canStoreCredit = order.customer.customerId !== null;
+  const defaultMethod: RefundMethod = canOriginal ? 'original' : canStoreCredit ? 'store_credit' : 'manual_bank';
 
   const schema = useMemo(
     () =>
@@ -52,21 +63,34 @@ function RefundDialogInner({ onClose, order }: Props) {
         .object({
           amount: z.string(),
           reason: z.string().trim().min(1, 'Give a reason for the refund.').max(500, 'Keep the reason under 500 characters.'),
+          method: z.enum(['original', 'manual_bank', 'manual_upi', 'store_credit']),
+          reference: z.string().trim().max(200),
+          note: z.string().trim().max(500),
         })
         .superRefine((v, ctx) => {
           const parsed = parseAmount(v.amount, digits, max, order.currency);
           if ('error' in parsed) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['amount'], message: parsed.error });
+          if ((v.method === 'manual_bank' || v.method === 'manual_upi') && !v.reference) {
+            ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['reference'], message: 'A bank/UPI reference is required for a manual refund.' });
+          }
+          if (v.method === 'original' && !canOriginal) {
+            ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['method'], message: 'This order has no stored payment reference, so it cannot be refunded through the provider.' });
+          }
+          if (v.method === 'store_credit' && !canStoreCredit) {
+            ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['method'], message: 'Store credit is only available for account orders.' });
+          }
         }),
-    [digits, max, order.currency],
+    [digits, max, order.currency, canOriginal, canStoreCredit],
   );
   type Values = z.infer<typeof schema>;
 
   const { register, handleSubmit, setError, formState, control } = useForm<Values>({
     resolver: zodResolver(schema),
-    defaultValues: { amount: (max / 100).toFixed(digits), reason: '' },
+    defaultValues: { amount: (max / 100).toFixed(digits), reason: '', method: defaultMethod, reference: '', note: '' },
   });
   const busy = formState.isSubmitting;
   const amountText = useWatch({ control, name: 'amount' }) ?? '';
+  const method = useWatch({ control, name: 'method' }) ?? defaultMethod;
   const preview = parseAmount(amountText, digits, max, order.currency);
 
   const onSubmit = async (v: Values) => {
@@ -74,9 +98,22 @@ function RefundDialogInner({ onClose, order }: Props) {
     const parsed = parseAmount(v.amount, digits, max, order.currency);
     if ('error' in parsed) return;
     try {
-      await orderService.refund(order.id, { amount: parsed.minor, reason: v.reason });
+      const updated = await orderService.refund(order.id, {
+        amount: parsed.minor,
+        reason: v.reason,
+        method: v.method,
+        reference: v.reference || undefined,
+        note: v.note || undefined,
+      });
       refreshSales();
-      toast(`Refund of ${formatWithCode(parsed.minor, order.currency)} recorded (simulated — no money moved).`, 'success');
+      const latest = updated.refunds[updated.refunds.length - 1];
+      if (v.method === 'original') {
+        toast(`Refund of ${formatWithCode(parsed.minor, order.currency)} issued via the payment provider${latest?.reference ? ` (refund ${latest.reference}).` : '.'}`, 'success');
+      } else if (v.method === 'store_credit') {
+        toast(`Refund of ${formatWithCode(parsed.minor, order.currency)} credited to the customer wallet.`, 'success');
+      } else {
+        toast(`Manual refund of ${formatWithCode(parsed.minor, order.currency)} recorded as pending — verify it on the order page once the money has been sent.`, 'success');
+      }
       onClose();
     } catch (e) {
       if (e instanceof ApiError && e.code === 'validation' && e.issues.length) applyServerErrors(e, setError);
@@ -88,15 +125,15 @@ function RefundDialogInner({ onClose, order }: Props) {
     <Modal
       open
       onClose={busy ? () => undefined : onClose}
-      title={`Refund ${order.number} (simulated)`}
-      description="Simulated — no money moves and no payment provider is contacted."
+      title={`Refund ${order.number}`}
+      description="The refund goes back in the order’s currency, to the original payment method unless you choose otherwise."
       footer={
         <>
           <Button variant="outline" onClick={onClose} disabled={busy}>
             Cancel
           </Button>
           <Button type="submit" form={formId} loading={busy}>
-            Record refund (simulated)
+            Issue refund
           </Button>
         </>
       }
@@ -119,7 +156,39 @@ function RefundDialogInner({ onClose, order }: Props) {
           data-autofocus
           {...register('amount')}
         />
+        <fieldset>
+          <legend className="mb-1.5 text-[13px] font-medium">Refund method</legend>
+          <div className="space-y-2">
+            {METHOD_LABELS.map((m) => {
+              const disabled = (m.value === 'original' && !canOriginal) || (m.value === 'store_credit' && !canStoreCredit);
+              return (
+                <label key={m.value} className={`flex cursor-pointer items-start gap-2.5 rounded-lg border px-3 py-2.5 text-[13px] ${disabled ? 'border-sand-200 bg-sand-50 text-ink-faint' : 'border-sand-200 bg-white'}`}>
+                  <input type="radio" value={m.value} disabled={disabled} {...register('method')} className="mt-0.5 accent-brand-600" />
+                  <span>
+                    <span className="block font-medium text-ink">{m.label}</span>
+                    <span className="block text-xs text-ink-muted">
+                      {m.hint}
+                      {m.value === 'original' && !canOriginal && ' Not available — no payment reference was stored for this order.'}
+                      {m.value === 'store_credit' && !canStoreCredit && ' Not available — this is a guest order.'}
+                    </span>
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+          {formState.errors.method?.message && <p className="mt-1 text-xs text-red-700">{formState.errors.method.message}</p>}
+        </fieldset>
+        {(method === 'manual_bank' || method === 'manual_upi') && (
+          <TextField
+            label={method === 'manual_bank' ? 'Bank reference' : 'UPI reference'}
+            required
+            hint="The transfer reference (UTR / transaction id). The refund stays pending until you verify it."
+            error={formState.errors.reference?.message}
+            {...register('reference')}
+          />
+        )}
         <TextareaField label="Reason" required rows={3} maxLength={500} hint="Recorded on the order timeline. Not sent to the customer." error={formState.errors.reason?.message} {...register('reason')} />
+        <TextareaField label="Note (optional)" rows={2} maxLength={500} hint="Internal note for the refund record." error={formState.errors.note?.message} {...register('note')} />
         <div className="rounded-lg border border-sand-200 bg-white px-3.5 py-1" aria-live="polite">
           <DefinitionList
             items={[

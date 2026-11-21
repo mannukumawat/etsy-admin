@@ -22,7 +22,7 @@ export interface AdminContactList {
   pages: number;
 }
 
-export function listContacts(params?: { status?: string; page?: number }) {
+export function listContacts(params?: { status?: string; page?: number; q?: string }) {
   return apiClient.get<AdminContactList>('/api/admin/contacts', { query: params });
 }
 

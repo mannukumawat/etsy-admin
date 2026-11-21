@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { ImageOff } from 'lucide-react';
+import { ArrowRight, ImageOff } from 'lucide-react';
 import { Skeleton } from '@/components/ui/Feedback';
 import type { MediaAsset } from '@/types';
 import type { HomepageItemGroup } from './itemGroupSections';
@@ -29,7 +29,7 @@ export function ItemGroupsOverview({ sections, media, loading }: { sections: Hom
               <p className="min-w-0 truncate text-sm font-semibold text-ink">{group.nameEn}</p>
             </div>
             <Link to={`/products?itemGroup=${group.id}`} className="shrink-0 text-xs font-medium text-brand-700 hover:underline">
-              {products.length} product{products.length === 1 ? '' : 's'} shown →
+              {products.length} product{products.length === 1 ? '' : 's'} shown <ArrowRight className="inline h-3.5 w-3.5" aria-hidden />
             </Link>
           </div>
           <ul className="grid grid-cols-2 gap-x-3 gap-y-4 p-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 2xl:grid-cols-10">

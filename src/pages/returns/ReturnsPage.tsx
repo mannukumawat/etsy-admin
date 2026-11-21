@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { PackageSearch } from 'lucide-react';
+import { ArrowRight, ChevronLeft, ChevronRight, PackageSearch } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/Feedback';
 import { PageHeader } from '@/components/ui/Page';
-import { usePageMeta } from '@/hooks/misc';
+import { usePageMeta, useDebounced } from '@/hooks/misc';
+import { useListParams } from '@/hooks/useListParams';
 import { useQuery } from '@/hooks/useQuery';
 import { fetchReturns, type AdminReturn, type AdminReturnList } from '@/api/returns';
 import { formatDateTime } from '@/utils/dates';
@@ -59,9 +60,13 @@ const PAGE_SIZE = 20;
 
 export default function ReturnsPage() {
   usePageMeta('Returns', [{ label: 'Sales' }]);
-  const [q, setQ] = useState('');
-  const [status, setStatus] = useState('all');
-  const [page, setPage] = useState(1);
+  // M-O3: list state lives in the URL (shareable, survives refresh/back) and the
+  // search is debounced — the old local useState fired a request per keystroke.
+  const list = useListParams(['status'], { pageSize: PAGE_SIZE });
+  const status = list.query.filters?.status ?? 'all';
+  const page = list.query.page ?? 1;
+  const [qInput, setQInput] = useState(list.query.q ?? '');
+  const q = useDebounced(qInput, 300);
 
   const queryKey = `returns:list:${status}:${q}:${page}`;
   const { data, isLoading, error, refetch } = useQuery<AdminReturnList>(queryKey, () =>
@@ -77,13 +82,13 @@ export default function ReturnsPage() {
     <>
       <PageHeader description="Manage customer return requests from request through refund." />
 
-      {/* Status tabs */}
+      {/* Status tabs — M-O2: every status is a tab now, not just seven of them. */}
       <div className="mb-3 flex gap-1 flex-wrap">
-        {(['all', 'requested', 'approved', 'received', 'inspected', 'refunded', 'rejected'] as const).map((s) => (
+        {(['all', 'requested', 'approved', 'shipping_arranged', 'in_transit', 'received', 'inspected', 'refunded', 'rejected', 'withdrawn', 'closed'] as const).map((s) => (
           <button
             key={s}
             type="button"
-            onClick={() => { setStatus(s); setPage(1); }}
+            onClick={() => list.update({ status: s === 'all' ? null : s })}
             className={cn(
               'inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors',
               status === s ? 'bg-ink text-white' : 'bg-white border border-sand-300 text-ink-soft hover:bg-sand-50',
@@ -104,8 +109,8 @@ export default function ReturnsPage() {
         <div className="border-b border-sand-200 p-4">
           <input
             type="search"
-            value={q}
-            onChange={(e) => { setQ(e.target.value); setPage(1); }}
+            value={qInput}
+            onChange={(e) => { setQInput(e.target.value); list.update({ q: e.target.value }); }}
             placeholder="Search reference, order number, customer…"
             className="input w-full sm:w-80"
           />
@@ -130,7 +135,7 @@ export default function ReturnsPage() {
             body={status !== 'all' || q ? 'Try a different status or search term.' : 'Customer return requests will appear here.'}
             action={
               (status !== 'all' || q) ? (
-                <Button variant="outline" size="sm" onClick={() => { setStatus('all'); setQ(''); setPage(1); }}>
+                <Button variant="outline" size="sm" onClick={() => { setQInput(''); list.clear(); }}>
                   Clear filters
                 </Button>
               ) : undefined
@@ -160,8 +165,8 @@ export default function ReturnsPage() {
                         <span className="font-mono font-medium text-ink">{r.reference}</span>
                       </td>
                       <td className="px-4 py-3">
-                        <Link to={`/orders/${r.orderId}`} className="text-brand-700 hover:underline">
-                          order
+                        <Link to={`/orders/${r.orderId}`} className="font-mono text-brand-700 hover:underline">
+                          {r.orderNumber ?? r.orderId}
                         </Link>
                       </td>
                       <td className="px-4 py-3 text-ink-soft">
@@ -176,8 +181,8 @@ export default function ReturnsPage() {
                         {formatDateTime(r.requestedAt)}
                       </td>
                       <td className="px-4 py-3">
-                        <Link to={`/returns/${r.id}`} className="text-xs font-medium text-brand-700 hover:underline whitespace-nowrap">
-                          View →
+                        <Link to={`/returns/${r.id}`} className="inline-flex items-center gap-1 text-xs font-medium text-brand-700 hover:underline whitespace-nowrap">
+                          View <ArrowRight className="h-3 w-3" aria-hidden />
                         </Link>
                       </td>
                     </tr>
@@ -190,8 +195,12 @@ export default function ReturnsPage() {
               <div className="flex items-center justify-between border-t border-sand-200 px-4 py-3 text-xs text-ink-muted">
                 <span>Page {page} of {pageCount} · {data?.total ?? 0} total</span>
                 <div className="flex gap-2">
-                  <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>← Prev</Button>
-                  <Button variant="outline" size="sm" disabled={page >= pageCount} onClick={() => setPage((p) => p + 1)}>Next →</Button>
+                  <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => list.update({ page: page - 1 }, false)}>
+                    <ChevronLeft className="h-3.5 w-3.5" aria-hidden /> Prev
+                  </Button>
+                  <Button variant="outline" size="sm" disabled={page >= pageCount} onClick={() => list.update({ page: page + 1 }, false)}>
+                    Next <ChevronRight className="h-3.5 w-3.5" aria-hidden />
+                  </Button>
                 </div>
               </div>
             )}

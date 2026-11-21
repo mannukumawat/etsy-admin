@@ -1,10 +1,12 @@
 import { Badge } from '@/components/ui/Feedback';
 import { PublishBadge } from '@/components/ui/StatusBadges';
+import { API_MODE } from '@/api';
 import { hasUnpublishedChanges } from '@/services/contentServices';
 import type { Versioned } from '@/types';
 import { formatDateTime } from '@/utils/dates';
 
-/** Publish state + timestamps for a versioned content document, with the "simulated publish" caveat. */
+/** Publish state + timestamps for a versioned content document. In live mode
+ *  publishing is real; only demo mode simulates it inside this admin. */
 export function PublishStatus({ doc, dirty }: { doc: Versioned<unknown>; dirty: boolean }) {
   const published = !!doc.published;
   return (
@@ -15,7 +17,7 @@ export function PublishStatus({ doc, dirty }: { doc: Versioned<unknown>; dirty: 
         <span>
           {published ? (
             <>
-              Published in admin preview <span className="num">{formatDateTime(doc.publishedAt)}</span>
+              Published{API_MODE ? '' : ' in admin preview'} <span className="num">{formatDateTime(doc.publishedAt)}</span>
             </>
           ) : (
             'Never published'
@@ -29,7 +31,9 @@ export function PublishStatus({ doc, dirty }: { doc: Versioned<unknown>; dirty: 
         </span>
       </div>
       <p className="text-xs text-ink-muted">
-        “Publish” is simulated: it only updates the published copy inside this admin preview. The storefront (a separate app) is not updated until backend integration, and changes reset on refresh.
+        {API_MODE
+          ? '“Publish” makes this version live on the storefront.'
+          : '“Publish” is simulated: it only updates the published copy inside this admin preview. The storefront (a separate app) is not updated in demo mode, and changes reset on refresh.'}
       </p>
     </div>
   );

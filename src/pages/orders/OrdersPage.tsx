@@ -1,9 +1,9 @@
 import { useId } from 'react';
 import { Link } from 'react-router-dom';
-import { SearchX, X } from 'lucide-react';
+import { AlertTriangle, SearchX, X } from 'lucide-react';
 import { CustomerKindBadge } from '@/components/orders/CustomerKindBadge';
-import { itemCount } from '@/components/orders/orderDisplay';
-import { Button } from '@/components/ui/Button';
+import { itemCount, paymentMethodLabel } from '@/components/orders/orderDisplay';
+import { Button, ButtonLink } from '@/components/ui/Button';
 import { DataTable, type Column } from '@/components/ui/DataTable';
 import { EmptyState } from '@/components/ui/Feedback';
 import { FilterBar } from '@/components/ui/FilterBar';
@@ -13,6 +13,7 @@ import { usePageMeta, useSettings } from '@/hooks/misc';
 import { useListParams } from '@/hooks/useListParams';
 import { useQuery } from '@/hooks/useQuery';
 import { orderService } from '@/services/salesServices';
+import { API_MODE } from '@/api';
 import type { FulfilmentStatus, Order, PaymentStatus } from '@/types';
 import { formatDate } from '@/utils/dates';
 import { formatWithCode } from '@/utils/money';
@@ -82,6 +83,16 @@ export default function OrdersPage() {
       cell: (o) => <span className="num whitespace-nowrap font-medium">{formatWithCode(o.total, o.currency)}</span>,
     },
     { key: 'payment', header: 'Payment', cell: (o) => <PaymentBadge status={o.payment.status} /> },
+    {
+      key: 'method',
+      header: 'Method',
+      hideBelow: 'lg',
+      cell: (o) => (
+        <span className="whitespace-nowrap text-ink-soft" title={o.payment.reference ? `Payment ${o.payment.reference}` : undefined}>
+          {paymentMethodLabel(o.payment.method)}
+        </span>
+      ),
+    },
     { key: 'fulfilment', header: 'Fulfilment', cell: (o) => <FulfilmentBadge status={o.fulfilment.status} /> },
   ];
 
@@ -90,9 +101,18 @@ export default function OrdersPage() {
       <PageHeader
         description={
           <>
-            <p>Each order keeps the currency and exchange rate captured at checkout. Payments and refunds here are simulations — no money moves.</p>
-            <p className="mt-1">Status changes do not notify customers and do not update the storefront (separate app, demo).</p>
+            <p>Each order keeps the currency and exchange rate captured at checkout. Refunds go through the payment provider in the order’s currency.</p>
+            <p className="mt-1">
+              {API_MODE
+                ? 'Status changes are saved to the order and the storefront shows the updated status on refresh. Customers are not emailed about them yet (email is not configured).'
+                : 'Demo mode: status changes are local to this admin preview and do not notify customers or update the storefront.'}
+            </p>
           </>
+        }
+        actions={
+          <ButtonLink to="/orders/payment-recoveries" size="sm" variant="outline" icon={<AlertTriangle className="h-4 w-4" aria-hidden />}>
+            Payment recoveries
+          </ButtonLink>
         }
       />
       <div className="card">

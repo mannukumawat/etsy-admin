@@ -125,14 +125,31 @@ function inventoryListConfig(threshold: number): ListConfig<InventoryRow> {
 }
 
 export const inventoryService = {
-  list(query: ListQuery): Promise<ListResult<InventoryRow>> {
-    const threshold = db.settings.store.lowStockThreshold;
+  /**
+   * M-I2: the low-stock threshold comes from LIVE settings (passed in by the page),
+   * never from the in-memory seed — the list filter, the badges and the Dashboard
+   * all classify against the same value now. M-I1: in API mode the search, filters,
+   * sort and paging run on the server; the mock path keeps the client-side list so
+   * demo mode behaves the same.
+   */
+  list(query: ListQuery, threshold?: number): Promise<ListResult<InventoryRow>> {
+    const liveThreshold = threshold ?? db.settings.store.lowStockThreshold;
     if (API_MODE) {
-      // The API returns every variant; search/sort/paging stay client-side so the list UI behaves
-      // the same in both modes.
-      return inventoryApi.fetchInventory().then((items) => runList(items, query, inventoryListConfig(threshold)));
+      const sort = query.sort === 'sku' || query.sort === 'stock' ? query.sort : 'product';
+      return inventoryApi
+        .fetchInventory({
+          q: query.q,
+          stock: query.filters?.stock,
+          category: query.filters?.category,
+          status: query.filters?.status,
+          sort,
+          dir: query.dir,
+          page: query.page,
+          pageSize: query.pageSize,
+        })
+        .then((r) => ({ items: r.items, total: r.total ?? r.items.length, page: r.page ?? 1, pageSize: r.pageSize ?? query.pageSize ?? 25, pageCount: r.pageCount ?? 1 }));
     }
-    return mockRequest(() => runList(inventoryRows(), query, inventoryListConfig(threshold)));
+    return mockRequest(() => runList(inventoryRows(), query, inventoryListConfig(liveThreshold)));
   },
 
   adjust(input: AdjustInput): Promise<StockAdjustment> {
@@ -171,13 +188,29 @@ export const inventoryService = {
     });
   },
 
-  history(filter: { variantId?: string; q?: string; limit?: number } = {}): Promise<StockAdjustment[]> {
-    if (API_MODE) return inventoryApi.fetchAdjustmentHistory(filter).then((items) => (filter.limit ? items.slice(0, filter.limit) : items));
+  /**
+   * M-I1: server-paged + filterable history in API mode (reason/actor/date/search);
+   * the old `limit`-then-slice(200) over a hard-capped 500 is gone.
+   */
+  history(filter: { variantId?: string; q?: string; reason?: string; actor?: string; from?: string; to?: string; page?: number; pageSize?: number } = {}): Promise<ListResult<StockAdjustment>> {
+    if (API_MODE) {
+      return inventoryApi.fetchAdjustmentHistory(filter).then((r) => ({ items: r.items, total: r.total ?? r.items.length, page: r.page ?? 1, pageSize: r.pageSize ?? filter.pageSize ?? 25, pageCount: r.pageCount ?? 1 }));
+    }
     return mockRequest(() => {
       const q = filter.q?.trim().toLowerCase();
-      return db.adjustments
-        .filter((a) => (!filter.variantId || a.variantId === filter.variantId) && (!q || `${a.sku} ${a.productName}`.toLowerCase().includes(q)))
-        .slice(0, filter.limit ?? 50);
+      const rows = db.adjustments.filter(
+        (a) =>
+          (!filter.variantId || a.variantId === filter.variantId) &&
+          (!q || `${a.sku} ${a.productName}`.toLowerCase().includes(q)) &&
+          (!filter.reason || a.reason === filter.reason) &&
+          (!filter.actor || a.actor.toLowerCase().includes(filter.actor.toLowerCase())) &&
+          (!filter.from || a.createdAt.slice(0, 10) >= filter.from) &&
+          (!filter.to || a.createdAt.slice(0, 10) <= filter.to),
+      );
+      const pageSize = Math.min(100, Math.max(1, filter.pageSize ?? 25));
+      const pageCount = Math.max(1, Math.ceil(rows.length / pageSize));
+      const page = Math.min(pageCount, Math.max(1, filter.page ?? 1));
+      return { items: rows.slice((page - 1) * pageSize, page * pageSize), total: rows.length, page, pageSize, pageCount };
     }, [120, 300]);
   },
 };

@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { AlertTriangle, ImageOff, Search, Trash2, Upload, X } from 'lucide-react';
+import { API_MODE } from '@/api';
 import { LocalUploadNotice, useUploader } from '@/components/media/MediaPicker';
 import { Button } from '@/components/ui/Button';
 import { Drawer } from '@/components/ui/Dialog';
@@ -25,10 +26,11 @@ type SourceFilter = 'all' | 'seed' | 'upload';
 
 const SOURCE_LABEL: Record<MediaAsset['source'], string> = {
   seed: 'Seeded sample art',
-  upload: 'Local upload (this browser only)',
+  // H15: in live mode uploads live on the server — only demo mode keeps them local.
+  upload: API_MODE ? 'Uploaded to server' : 'Local upload (this browser only)',
 };
 
-/** Everything the media page changes lives in the in-memory admin preview. */
+/** In live mode media changes are saved on the server; in demo mode they live in the in-memory admin preview. */
 const refreshAfterMediaChange = () => invalidate('media', 'products', 'product:', 'categories', 'homepage', 'settings');
 
 const altSchema = z.object({ alt: localized(false, 200) });
@@ -104,7 +106,7 @@ function DeletePanel({ asset, usages, onCancel, onDeleted }: { asset: MediaAsset
     try {
       const res = await mediaService.remove(asset.id, used);
       refreshAfterMediaChange();
-      toast(res.detached ? `Image deleted and removed from ${res.detached} place${res.detached === 1 ? '' : 's'} in this admin preview.` : 'Image deleted from this admin preview.', 'success');
+      toast(res.detached ? `Image deleted and removed from ${res.detached} place${res.detached === 1 ? '' : 's'}${API_MODE ? '' : ' in this admin preview'}.` : `Image deleted${API_MODE ? '' : ' from this admin preview'}.`, 'success');
       onDeleted();
     } catch (e) {
       // The image was attached somewhere between opening this panel and confirming: show where, then allow a forced delete.
@@ -138,8 +140,12 @@ function DeletePanel({ asset, usages, onCancel, onDeleted }: { asset: MediaAsset
       )}
       <p className="mt-2 text-xs text-red-900">
         {asset.source === 'seed'
-          ? 'This is seeded sample art: deleting it only affects this admin preview and it comes back on refresh or “Reset demo data”.'
-          : 'This local upload only exists in this browser tab; its preview is released immediately.'}
+          ? API_MODE
+            ? 'This is seeded sample art. Deleting it is permanent in live mode.'
+            : 'This is seeded sample art: deleting it only affects this admin preview and it comes back on refresh or “Reset demo data”.'
+          : API_MODE
+            ? 'This upload lives on the server. Deleting it removes it everywhere it is used.'
+            : 'This local upload only exists in this browser tab; its preview is released immediately.'}
       </p>
       {error && (
         <Notice tone="error" role="alert" className="mt-2">
@@ -218,7 +224,9 @@ function MediaDetails({ asset, onClose }: { asset: MediaAsset; onClose: () => vo
         <Button variant="dangerOutline" size="sm" icon={<Trash2 className="h-3.5 w-3.5" aria-hidden />} onClick={() => setConfirming(true)} disabled={confirming}>
           Delete image…
         </Button>
-        <p className="mt-1.5 text-xs text-ink-muted">Deleting only affects this admin preview — seeded images return on refresh or “Reset demo data”.</p>
+        <p className="mt-1.5 text-xs text-ink-muted">
+          {API_MODE ? 'Deleting an image removes it everywhere it is used. This cannot be undone.' : 'Deleting only affects this admin preview — seeded images return on refresh or “Reset demo data”.'}
+        </p>
       </div>
     </div>
   );
@@ -375,7 +383,7 @@ export default function MediaPage() {
         open={!!selected}
         onClose={() => setSelectedId(null)}
         title={selected?.fileName ?? 'Image'}
-        description="Alt text, usage and deletion — all inside this admin preview."
+        description={API_MODE ? 'Alt text, usage and deletion.' : 'Alt text, usage and deletion — all inside this admin preview.'}
       >
         {selected ? <MediaDetails key={selected.id} asset={selected} onClose={() => setSelectedId(null)} /> : <Spinner />}
       </Drawer>

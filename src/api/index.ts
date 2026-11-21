@@ -9,6 +9,7 @@ export * as inventoryApi from './inventory';
 export * as settingsApi from './settings';
 export * as contentApi from './content';
 export * as ordersApi from './orders';
+export * as paymentRecoveriesApi from './paymentRecoveries';
 export * as couponsApi from './coupons';
 export * as customersApi from './customers';
 export * as dashboardApi from './dashboard';
@@ -20,6 +21,8 @@ export type { AdminCollection, AdminCollectionCircle, AdminCollectionSection, Co
 export type * from './types';
 export * as reviewsApi from './reviews';
 export * as returnsApi from './returns';
+export * as walletApi from './wallet';
+export * as notificationsApi from './notifications';
 export type { AdminReturn, AdminReturnList, AdminReturnQuery, ReturnEvent as AdminReturnEvent, ReturnRefund as AdminReturnRefund } from './returns';
 export type { AdminReview, AdminReviewList, AdminReviewQuery, ReviewStatus } from './reviews';
 export * as translationsApi from './translations';

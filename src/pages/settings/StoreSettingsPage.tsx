@@ -19,13 +19,14 @@ import { settingsService } from '@/services/settingsService';
 import { toast } from '@/store';
 import type { Settings, StoreSettings } from '@/types';
 import { applyServerErrors, localized, num } from '@/utils/forms';
-import { isHttpUrl } from '@/utils/misc';
+import { isHttpsUrl } from '@/utils/misc';
 
 const httpsUrl = z
   .string()
   .trim()
   .max(300, 'Keep it under 300 characters.')
-  .refine((v) => !v || (/^https:\/\//i.test(v) && isHttpUrl(v)), 'Use a full https:// URL or leave empty.');
+  // L-S2: https-only, matching the backend — http links are rejected on both sides.
+  .refine((v) => !v || isHttpsUrl(v), 'Use a full https:// URL or leave empty.');
 
 const wholeNumber = (min: number, max: number, message: string) =>
   z.number({ invalid_type_error: 'Enter a number.' }).int('Use a whole number.').min(min, message).max(max, message);
@@ -36,7 +37,9 @@ const schema = z.object({
   logoId: z.string().nullable(),
   contact: z.object({
     email: z.string().trim().email('Enter a valid email address.'),
-    phone: z.string().trim().max(40, 'Keep it under 40 characters.'),
+    // L-S2: phone max 30 and address max 240 match the backend exactly — the old
+    // 40/240 split let a value pass one side and fail the other.
+    phone: z.string().trim().max(30, 'Keep it under 30 characters.'),
     address: z.string().trim().max(240, 'Keep it under 240 characters.'),
     hours: localized(false, 120),
   }),
@@ -113,7 +116,7 @@ function StorePreviewModal({ values: v, onClose }: { values: Values; onClose: ()
       }
     >
       <div className="mb-4">
-        <PreviewBanner>Nothing is saved until you click “Save changes”. The storefront currently shows its own built-in logo, not the one chosen here.</PreviewBanner>
+        <PreviewBanner>Nothing is saved until you click “Save changes”. The chosen logo appears in this admin header right away and is served to the storefront with the store settings; the storefront header itself still shows its built-in logo until its next update.</PreviewBanner>
       </div>
 
       <div className="overflow-hidden rounded-xl border border-sand-200 bg-ivory shadow-card">
@@ -308,8 +311,8 @@ function StoreForm({ settings }: { settings: Settings }) {
 
             <Card title={<CardTitle icon={Truck}>Orders & shipping time</CardTitle>} description="How long you need to pack an order, and how much one customer can buy at once.">
               <div className="mb-4 flex flex-wrap items-center gap-1.5 text-xs text-ink-muted">
-                <Badge tone="warning">Saved, but not used on the storefront yet</Badge>
-                <span>Delivery dates there currently assume 1–2 days handling, and the cart has its own quantity limit.</span>
+                <Badge tone="info">Enforced at checkout; storefront display update pending</Badge>
+                <span>Checkout already refuses more than this quantity per line, and the storefront can read these values from public settings — the cart limit and delivery dates shown there still use their own built-in values until the storefront update lands.</span>
               </div>
               <div className="grid gap-4 sm:grid-cols-3">
                 <TextField

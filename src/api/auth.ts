@@ -31,3 +31,16 @@ export async function logout(): Promise<void> {
   }
   setCsrfToken(null);
 }
+
+/**
+ * Real password reset (C5). The server always answers 200 to avoid revealing whether
+ * the email belongs to an admin; `delivered` tells the UI honestly whether an email
+ * actually went out (false while the server has no SMTP configured).
+ */
+export async function requestReset(email: string): Promise<{ delivered: boolean }> {
+  return apiClient.post<{ ok: true; delivered: boolean }>('/api/admin/auth/forgot-password', { email }, { skipAuthHandler: true });
+}
+
+export async function resetPassword(token: string, password: string): Promise<{ ok: true }> {
+  return apiClient.post<{ ok: true }>('/api/admin/auth/reset-password', { token, password }, { skipAuthHandler: true });
+}

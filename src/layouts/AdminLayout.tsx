@@ -1,14 +1,17 @@
 import { Suspense, useEffect, useState } from 'react';
 import { Link, Navigate, NavLink, Outlet, useLocation } from 'react-router-dom';
 import { ChevronRight, ExternalLink, LogOut, Menu as MenuIcon, PanelLeftClose, PanelLeftOpen, RotateCcw, UserCircle2 } from 'lucide-react';
-import logoMark from '@/assets/logo-mark.png';
+import logoMark from '@/assets/logo-mark.webp';
+import { fetchOwnerUnreadCount } from '@/api/notifications';
+import { useMediaMap } from '@/components/media/MediaPicker';
 import { IconButton } from '@/components/ui/Button';
+
 import { ConfirmHost, Drawer } from '@/components/ui/Dialog';
 import { Spinner } from '@/components/ui/Feedback';
 import { Menu, ToastViewport } from '@/components/ui/Menu';
 import { APP, NAV } from '@/config/app';
 import { useSettings } from '@/hooks/misc';
-import { invalidate } from '@/hooks/useQuery';
+import { invalidate, useQuery } from '@/hooks/useQuery';
 import { errorMessage } from '@/services/api';
 import { authService, demoService } from '@/services/settingsService';
 import { API_MODE, setUnauthorizedHandler } from '@/api';
@@ -43,10 +46,19 @@ export function RequireAdmin({ children }: { children: JSX.Element }) {
 
 function Brand({ collapsed }: { collapsed?: boolean }) {
   const { data: settings } = useSettings();
+  const { map: media } = useMediaMap();
   const name = settings?.store.name ?? 'Your Store';
+  // H1: the admin header shows the logo the owner chose in Settings → Store, not the
+  // bundled mark. The media map resolves the logo id to its URL (Cloudinary or
+  // /media/:id); a missing logo falls back to the bundled mark.
+  const logoUrl = settings?.store.logoId ? media.get(settings.store.logoId)?.url : undefined;
   return (
     <Link to="/dashboard" className="flex min-w-0 items-center gap-2.5 rounded-lg px-1" aria-label={`${name} admin — dashboard`}>
-      <img src={logoMark} alt="" className="h-8 w-8 shrink-0 object-contain" />
+      {logoUrl ? (
+        <img src={logoUrl} alt="" className="h-8 w-8 shrink-0 rounded-full border border-sand-200 object-cover" />
+      ) : (
+        <img src={logoMark} alt="" className="h-8 w-8 shrink-0 object-contain" />
+      )}
 
       {!collapsed && (
         <span className="min-w-0">
@@ -65,7 +77,7 @@ function NavList({ collapsed, onNavigate }: { collapsed?: boolean; onNavigate?: 
         <div key={group.label}>
           {!collapsed && <p className="mb-1 px-3 text-2xs font-semibold uppercase tracking-wider text-ink-faint">{group.label}</p>}
           <ul className="space-y-0.5">
-            {group.items.map(({ to, label, icon: Icon }) => (
+            {group.items.map(({ to, label, icon: Icon, badge }) => (
               <li key={to}>
                 <NavLink
                   to={to}
@@ -81,6 +93,7 @@ function NavList({ collapsed, onNavigate }: { collapsed?: boolean; onNavigate?: 
                 >
                   <Icon className="h-[18px] w-[18px] shrink-0" aria-hidden />
                   <span className={collapsed ? 'sr-only' : ''}>{label}</span>
+                  {badge === 'unreadNotifications' && !collapsed && <UnreadNotificationsBadge />}
                 </NavLink>
               </li>
             ))}
@@ -88,6 +101,20 @@ function NavList({ collapsed, onNavigate }: { collapsed?: boolean; onNavigate?: 
         </div>
       ))}
     </nav>
+  );
+}
+
+/** H12: unread-owner-notification count shown on the Notifications nav entry.
+ *  Live mode only — notifications are an API feature; the count is refreshed
+ *  whenever the inbox marks something read (invalidate('notifications:unread')). */
+function UnreadNotificationsBadge() {
+  const { data } = useQuery(API_MODE ? 'notifications:unread' : null, () => fetchOwnerUnreadCount());
+  const count = data?.count ?? 0;
+  if (count <= 0) return null;
+  return (
+    <span className="ml-auto inline-flex min-w-5 items-center justify-center rounded-full bg-brand-600 px-1.5 py-0.5 text-[11px] font-semibold leading-none text-white" aria-label={`${count} unread notifications`}>
+      {count > 99 ? '99+' : count}
+    </span>
   );
 }
 
@@ -145,10 +172,10 @@ function Topbar({ onOpenNav }: { onOpenNav: () => void }) {
           target="_blank"
           rel="noreferrer"
           className="hidden items-center gap-1.5 rounded-lg border border-sand-300 px-3 py-1.5 text-[13px] font-medium text-ink-soft hover:bg-ivory-50 sm:inline-flex"
-          title="Opens the storefront in a new tab. It does not show admin changes in this phase."
+          title="Opens the storefront in a new tab."
         >
           View store <ExternalLink className="h-3.5 w-3.5" aria-hidden />
-          <span className="sr-only">(opens in a new tab; admin changes are not shown there yet)</span>
+          <span className="sr-only">(opens in a new tab)</span>
         </a>
         <Menu
           label="Admin account"
@@ -159,13 +186,16 @@ function Topbar({ onOpenNav }: { onOpenNav: () => void }) {
               <span className="sr-only md:hidden">Admin account</span>
               <span className="hidden text-left md:block">
                 <span className="block text-[13px] font-medium leading-tight text-ink">{user?.name}</span>
-                <span className="block text-2xs text-ink-muted">Demo owner</span>
+                <span className="block text-2xs text-ink-muted">{user?.role === 'owner' ? 'Store owner' : 'Admin'}</span>
               </span>
             </span>
           }
           items={[
             { label: 'View store (separate app)', icon: <ExternalLink className="h-4 w-4" aria-hidden />, href: APP.storefrontUrl },
-            { label: 'Reset demo data…', icon: <RotateCcw className="h-4 w-4" aria-hidden />, onSelect: () => void reset() },
+            // H8: "Reset demo data" only resets the in-memory demo database — in live
+            // (API) mode it changes nothing server-side, so the item is hidden there
+            // instead of toasting a success it did not perform.
+            ...(!API_MODE ? [{ label: 'Reset demo data…', icon: <RotateCcw className="h-4 w-4" aria-hidden />, onSelect: () => void reset() }] : []),
             {
               label: 'Sign out',
               icon: <LogOut className="h-4 w-4" aria-hidden />,

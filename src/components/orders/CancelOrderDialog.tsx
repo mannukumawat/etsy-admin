@@ -38,6 +38,9 @@ function CancelOrderDialogInner({ onClose, order }: Props) {
   const [formError, setFormError] = useState<string | null>(null);
   const refundable = refundableAmount(order);
   const canRestock = !order.fulfilment.restocked;
+  // A cancellation refund goes through the payment provider — only possible when the
+  // original payment id was stored (wallet orders are credited back to the wallet).
+  const canAutoRefund = order.payment.method === 'wallet' ? order.customer.customerId !== null : order.payment.reference !== '';
   const { register, handleSubmit, setError, formState } = useForm<Values>({
     resolver: zodResolver(schema),
     defaultValues: { reason: '', restock: canRestock, refund: refundable > 0 },
@@ -47,7 +50,7 @@ function CancelOrderDialogInner({ onClose, order }: Props) {
   const onSubmit = async (v: Values) => {
     setFormError(null);
     try {
-      await orderService.cancel(order.id, { reason: v.reason, restock: canRestock && v.restock, refund: refundable > 0 && v.refund });
+      await orderService.cancel(order.id, { reason: v.reason, restock: canRestock && v.restock, refund: refundable > 0 && canAutoRefund && v.refund });
       refreshSales();
       toast(`Order ${order.number} cancelled.`, 'success');
       onClose();
@@ -87,15 +90,25 @@ function CancelOrderDialogInner({ onClose, order }: Props) {
           <p className="text-[13px] text-ink-muted">Items were already returned to stock.</p>
         )}
         {refundable > 0 ? (
-          <CheckboxField
-            label={`Refund the remaining ${formatWithCode(refundable, order.currency)} (simulated)`}
-            description="Simulated — no money moves. Payment will show as refunded."
-            {...register('refund')}
-          />
+          canAutoRefund ? (
+            <CheckboxField
+              label={`Refund the remaining ${formatWithCode(refundable, order.currency)}`}
+              description={
+                order.payment.method === 'wallet'
+                  ? 'Credited back to the customer’s wallet.'
+                  : 'Refunded through the payment provider, in the order’s currency.'
+              }
+              {...register('refund')}
+            />
+          ) : (
+            <Notice tone="warning">
+              The remaining {formatWithCode(refundable, order.currency)} cannot be refunded automatically — no payment reference was stored for this order. Cancel without a refund, then record a manual refund from the order page.
+            </Notice>
+          )
         ) : (
           <p className="text-[13px] text-ink-muted">No captured payment is left on this order, so there is nothing to refund.</p>
         )}
-        <Notice tone="demo">The customer is not notified and the storefront is not updated (separate app, demo).</Notice>
+        <Notice tone="info">The customer is not notified and the storefront is not updated (separate app, demo).</Notice>
       </form>
     </Modal>
   );

@@ -2,7 +2,7 @@ import { COUNTRIES } from '@/data/countries';
 import type { AdminUser, CurrencySettings, DashboardMetrics, DateRange, Settings, ShippingSettings, StoreSettings, TaxSettings } from '@/types';
 import { isValidRange } from '@/utils/dates';
 import { computeDashboard } from '@/utils/metrics';
-import { isHttpUrl } from '@/utils/misc';
+import { isHttpsUrl } from '@/utils/misc';
 import { ApiError, mockRequest, validationError, type FieldIssue } from './api';
 import { API_MODE, authApi, dashboardApi, settingsApi } from '@/api';
 import { db, nowIso, resetDb } from './db';
@@ -30,7 +30,10 @@ export const settingsService = {
       const issues: FieldIssue[] = [];
       if (!input.name.trim() || input.name.length > 60) issues.push({ path: 'name', message: 'Store name is required (max 60 characters).' });
       if (!EMAIL_RE.test(input.contact.email)) issues.push({ path: 'contact.email', message: 'Enter a valid email address.' });
-      for (const [k, v] of Object.entries(input.social)) if (v && !isHttpUrl(v)) issues.push({ path: `social.${k}`, message: 'Use a full https:// URL or leave empty.' });
+      // L-S2: same bounds as the admin form and the backend (phone 30, address 240, https-only social).
+      if (input.contact.phone.length > 30) issues.push({ path: 'contact.phone', message: 'Keep it under 30 characters.' });
+      if (input.contact.address.length > 240) issues.push({ path: 'contact.address', message: 'Keep it under 240 characters.' });
+      for (const [k, v] of Object.entries(input.social)) if (v && !isHttpsUrl(v)) issues.push({ path: `social.${k}`, message: 'Use a full https:// URL or leave empty.' });
       if (!int(input.handlingDays.min, 0, 30)) issues.push({ path: 'handlingDays.min', message: '0–30 days.' });
       if (!int(input.handlingDays.max, 0, 30)) issues.push({ path: 'handlingDays.max', message: '0–30 days.' });
       else if (input.handlingDays.max < input.handlingDays.min) issues.push({ path: 'handlingDays.max', message: 'Maximum must be at least the minimum.' });
@@ -61,6 +64,8 @@ export const settingsService = {
     if (API_MODE) return settingsApi.updateShippingSettings(input).then((s) => s.shipping);
     return mockRequest(() => {
       const issues: FieldIssue[] = [];
+      if (!input.zones.length) issues.push({ path: 'zones', message: 'Add at least one shipping zone.' });
+      if (input.zones.length > 20) issues.push({ path: 'zones', message: 'At most 20 shipping zones.' });
       const names = new Set<string>();
       const owner = new Map<string, string>();
       input.zones.forEach((z, i) => {
@@ -153,10 +158,16 @@ export const dashboardService = {
 };
 
 // ---------------------------------------------------------------------------------------------
-// Demo admin access — SIMULATED. Not security: route guards in the browser can always be bypassed.
+// Demo admin access — development only, never in a shipped build.
+// L-S9: the demo password used to be a hardcoded constant in the shipped bundle
+// (anyone could read it from the built JavaScript). It now lives behind
+// `import.meta.env.DEV`, which Vite replaces with a static `false` in production
+// builds, so the whole branch — credentials included — is dead-code-eliminated
+// from `dist/`. Demo mode is unreachable in production anyway: main.tsx refuses
+// to boot without VITE_API_BASE_URL. In dev (`vite dev`, Vitest) the mock login
+// below still works for local testing.
 // ---------------------------------------------------------------------------------------------
-
-export const DEMO_ADMIN = { email: 'owner@yourstore.example', password: 'AdminDemo2026' } as const;
+const DEMO_ADMIN = import.meta.env.DEV ? { email: 'owner@yourstore.example', password: 'AdminDemo2026' } as const : null;
 
 export const authService = {
   login(email: string, password: string): Promise<AdminUser> {
@@ -165,15 +176,25 @@ export const authService = {
       return authApi.login({ email, password });
     }
     return mockRequest(() => {
+      if (!DEMO_ADMIN) throw new ApiError('unauthorized', 'Demo sign-in is not available in this build.');
       if (email.trim().toLowerCase() !== DEMO_ADMIN.email || password !== DEMO_ADMIN.password) {
-        throw new ApiError('unauthorized', 'Email or password is incorrect. Use the demo admin credentials shown on this page.');
+        throw new ApiError('unauthorized', 'Email or password is incorrect.');
       }
       return { id: 'admin_owner', name: 'Store Owner', email: DEMO_ADMIN.email, role: 'owner' as const };
     }, [400, 800]);
   },
 
-  requestReset(_email: string): Promise<void> {
-    return mockRequest(() => undefined, [400, 800]);
+  /** Real password reset: in live mode the server creates a one-hour token and emails the link. */
+  requestReset(email: string): Promise<{ delivered: boolean }> {
+    if (API_MODE) return authApi.requestReset(email);
+    // Demo mode has no server and no mail — say so honestly instead of faking success.
+    return mockRequest(() => ({ delivered: false }), [400, 800]);
+  },
+
+  /** Sets a new password from a reset link. Live mode only; demo mode has no accounts to reset. */
+  resetPassword(token: string, password: string): Promise<void> {
+    if (API_MODE) return authApi.resetPassword(token, password).then(() => undefined);
+    return Promise.reject(new ApiError('conflict', 'Password reset is not available in demo mode.'));
   },
 
   /** Restores a session from the httpOnly cookie after a refresh. Null when signed out. */

@@ -3,12 +3,12 @@ import { Controller, FormProvider, useFieldArray, useForm, useWatch } from 'reac
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { Eye, Layers, Plus, RotateCcw, Save, Send, X } from 'lucide-react';
-import { itemGroupsApi } from '@/api';
+import { API_MODE, itemGroupsApi } from '@/api';
 import { PUBLISH_SIMULATION_TEXT } from '@/components/content/contentMeta';
 import { HomepagePreview } from '@/components/content/HomepagePreview';
 import { ItemGroupsOverview } from '@/components/content/ItemGroupsOverview';
 import { buildHomepageItemGroups } from '@/components/content/itemGroupSections';
-import { HOMEPAGE_LIST_MAX } from '@/components/content/ProductListEditor';
+import { HOMEPAGE_LIST_MAX, ProductListEditor } from '@/components/content/ProductListEditor';
 import { PublishStatus } from '@/components/content/PublishStatus';
 import { ReorderControls, useReorderFocus } from '@/components/content/ReorderControls';
 import { useUnsavedChangesGuard } from '@/components/content/useUnsavedChangesGuard';
@@ -21,6 +21,7 @@ import { ActionBar, Card, PageHeader } from '@/components/ui/Page';
 import { usePageMeta } from '@/hooks/misc';
 import { invalidate, useQuery } from '@/hooks/useQuery';
 import { ApiError, errorMessage, type FieldIssue } from '@/services/api';
+import { categoryService } from '@/services/catalogServices';
 import { contentService, hasUnpublishedChanges } from '@/services/contentServices';
 import { productService } from '@/services/productService';
 import { confirmAction, toast } from '@/store';
@@ -98,6 +99,7 @@ function HomepageEditor({ doc: loadedDoc }: { doc: Versioned<HomepageContent> })
   const { map: media } = useMediaMap();
   const { data: itemGroups } = useQuery('item-groups', () => itemGroupsApi.fetchItemGroups());
   const { data: products } = useQuery('products:all', () => productService.all());
+  const { data: categories } = useQuery('categories', () => categoryService.list());
   const activeProducts = useMemo(() => (products ?? []).filter((product) => product.status === 'active'), [products]);
   const itemSections = useMemo(() => buildHomepageItemGroups(itemGroups, products), [itemGroups, products]);
 
@@ -155,14 +157,14 @@ function HomepageEditor({ doc: loadedDoc }: { doc: Versioned<HomepageContent> })
   const publish = async () => {
     const saveFirst = isDirty;
     const ok = await confirmAction({
-      title: 'Publish homepage (simulated)?',
+      title: API_MODE ? 'Publish homepage?' : 'Publish homepage (demo)?',
       body: (
         <div className="space-y-2">
           <p>{saveFirst ? 'Your unsaved edits are saved to the draft first; then the draft becomes the published version.' : 'The saved draft becomes the published version.'}</p>
-          <p>{PUBLISH_SIMULATION_TEXT}</p>
+          <p>{API_MODE ? 'The published homepage is served to the storefront.' : PUBLISH_SIMULATION_TEXT}</p>
         </div>
       ),
-      confirmLabel: 'Publish in admin preview',
+      confirmLabel: API_MODE ? 'Publish' : 'Publish in demo preview',
     });
     if (!ok) return;
     setBusy('publish');
@@ -170,7 +172,7 @@ function HomepageEditor({ doc: loadedDoc }: { doc: Versioned<HomepageContent> })
     try {
       if (saveFirst && !(await validateAndSave())) return;
       applySaved(await contentService.publishHomepage());
-      toast('Published in the admin preview only. The storefront is not updated until backend integration.', 'success');
+      toast(API_MODE ? 'Homepage published.' : 'Published in the demo preview only. The storefront is not updated until backend integration.', 'success');
     } catch (e) {
       if (e instanceof ApiError && e.code === 'validation') setPublishIssues(e.issues);
       applyServerErrors(e, setError, 'Could not publish.');
@@ -182,7 +184,7 @@ function HomepageEditor({ doc: loadedDoc }: { doc: Versioned<HomepageContent> })
   const discard = async () => {
     const ok = await confirmAction({
       title: 'Discard draft changes?',
-      body: `The draft goes back to the version published in the admin preview on ${formatDateTime(doc.publishedAt)}. Unsaved edits are lost too. This can’t be undone.`,
+      body: `The draft goes back to the version published ${API_MODE ? '' : 'in the admin preview '}on ${formatDateTime(doc.publishedAt)}. Unsaved edits are lost too. This can’t be undone.`,
       confirmLabel: 'Discard changes',
       tone: 'danger',
     });
@@ -382,6 +384,100 @@ function HomepageEditor({ doc: loadedDoc }: { doc: Versioned<HomepageContent> })
           >
             <ItemGroupsOverview sections={itemSections} media={media} loading={!itemGroups || !products} />
           </Card>
+
+          {/* H13: these sections were validated by the schema (and used by the storefront)
+              but had no editor — the form silently kept whatever was saved before. */}
+          <Card title="Featured categories" description="Category tiles shown on the homepage.">
+            <Controller
+              control={control}
+              name="featuredCategoryIds"
+              render={({ field }) => (
+                <div className="space-y-2">
+                  {!categories && <Skeleton className="h-10 w-full" />}
+                  {(categories ?? []).map((category) => {
+                    const checked = field.value.includes(category.id);
+                    return (
+                      <label key={category.id} className="flex cursor-pointer items-center gap-2.5 text-sm text-ink">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => {
+                            const next = checked ? field.value.filter((id) => id !== category.id) : [...field.value, category.id];
+                            field.onChange(next);
+                            setValue('featuredCategoryIds', next, { shouldDirty: true });
+                          }}
+                          className="h-4 w-4 rounded border-sand-300 accent-brand-600"
+                        />
+                        {category.name.en}
+                      </label>
+                    );
+                  })}
+                  {(categories ?? []).length === 0 && <p className="text-[13px] text-ink-muted">No categories yet — add one from Catalog → Categories.</p>}
+                </div>
+              )}
+            />
+          </Card>
+
+          <Card title="Featured products" description="Hand-picked products shown in the featured row. Only active products can be published on the homepage.">
+            <Controller
+              control={control}
+              name="featuredProductIds"
+              render={({ field }) => (
+                <ProductListEditor
+                  label="Featured products"
+                  value={field.value}
+                  onChange={(ids) => setValue('featuredProductIds', ids, { shouldDirty: true })}
+                  products={products}
+                  media={media}
+                  error={errors.featuredProductIds?.message}
+                  max={HOMEPAGE_LIST_MAX}
+                />
+              )}
+            />
+          </Card>
+
+          <Card title="Bestsellers" description="Up to 8 products shown in the bestsellers row. Only active products can be published on the homepage.">
+            <Controller
+              control={control}
+              name="bestsellerProductIds"
+              render={({ field }) => (
+                <ProductListEditor
+                  label="Bestsellers"
+                  value={field.value}
+                  onChange={(ids) => setValue('bestsellerProductIds', ids, { shouldDirty: true })}
+                  products={products}
+                  media={media}
+                  error={errors.bestsellerProductIds?.message}
+                  max={8}
+                />
+              )}
+            />
+          </Card>
+
+          <Card title="New arrivals" description="Up to 8 products shown in the new arrivals row. Only active products can be published on the homepage.">
+            <Controller
+              control={control}
+              name="newArrivalProductIds"
+              render={({ field }) => (
+                <ProductListEditor
+                  label="New arrivals"
+                  value={field.value}
+                  onChange={(ids) => setValue('newArrivalProductIds', ids, { shouldDirty: true })}
+                  products={products}
+                  media={media}
+                  error={errors.newArrivalProductIds?.message}
+                  max={8}
+                />
+              )}
+            />
+          </Card>
+
+          <Card title="Newsletter" description="The newsletter signup block at the bottom of the homepage.">
+            <div className="space-y-4">
+              <LocalizedField name="newsletter.title" label="Title" required maxLength={120} />
+              <LocalizedField name="newsletter.body" label="Body" multiline rows={3} maxLength={400} />
+            </div>
+          </Card>
         </form>
 
         <ActionBar
@@ -391,8 +487,12 @@ function HomepageEditor({ doc: loadedDoc }: { doc: Versioned<HomepageContent> })
               : !doc.published
                 ? 'Draft saved. Not published yet.'
                 : changed
-                  ? 'Draft saved. It differs from the published version (admin preview).'
-                  : 'Draft matches the published version (admin preview).'
+                  ? API_MODE
+                    ? 'Draft saved. It differs from the published version.'
+                    : 'Draft saved. It differs from the published version (demo preview).'
+                  : API_MODE
+                    ? 'Draft matches the published version.'
+                    : 'Draft matches the published version (demo preview).'
           }
         >
           {canDiscard && (
@@ -411,7 +511,7 @@ function HomepageEditor({ doc: loadedDoc }: { doc: Versioned<HomepageContent> })
           </Button>
         </ActionBar>
 
-        {preview && <HomepagePreview open values={preview} onClose={() => setPreview(null)} media={media} itemSections={itemSections} />}
+        {preview && <HomepagePreview open values={preview} onClose={() => setPreview(null)} media={media} itemSections={itemSections} products={products} categories={categories} />}
       </FormProvider>
     </ContentLangProvider>
   );

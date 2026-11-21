@@ -5,6 +5,7 @@ import { RouteError } from '@/pages/NotFoundPage';
 
 const LoginPage = lazy(() => import('@/pages/LoginPage'));
 const ForgotPasswordPage = lazy(() => import('@/pages/ForgotPasswordPage'));
+const ResetPasswordPage = lazy(() => import('@/pages/ResetPasswordPage'));
 const DashboardPage = lazy(() => import('@/pages/DashboardPage'));
 const ProductsPage = lazy(() => import('@/pages/products/ProductsPage'));
 const ProductEditorPage = lazy(() => import('@/pages/products/ProductEditorPage'));
@@ -12,6 +13,7 @@ const CategoriesPage = lazy(() => import('@/pages/CategoriesPage'));
 const ItemGroupsPage = lazy(() => import('@/pages/ItemGroupsPage'));
 const InventoryPage = lazy(() => import('@/pages/InventoryPage'));
 const OrdersPage = lazy(() => import('@/pages/orders/OrdersPage'));
+const PaymentRecoveriesPage = lazy(() => import('@/pages/orders/PaymentRecoveriesPage'));
 const OrderDetailPage = lazy(() => import('@/pages/orders/OrderDetailPage'));
 const CustomersPage = lazy(() => import('@/pages/customers/CustomersPage'));
 const CustomerDetailPage = lazy(() => import('@/pages/customers/CustomerDetailPage'));
@@ -21,6 +23,8 @@ const ContactsPage = lazy(() => import('@/pages/ContactsPage'));
 const HelpPage = lazy(() => import('@/pages/HelpPage'));
 const ReturnsPage = lazy(() => import('@/pages/returns/ReturnsPage'));
 const ReturnDetailPage = lazy(() => import('@/pages/returns/ReturnDetailPage'));
+const ExchangesPage = lazy(() => import('@/pages/exchanges/ExchangesPage'));
+const ExchangeDetailPage = lazy(() => import('@/pages/exchanges/ExchangeDetailPage'));
 const TranslationsPage = lazy(() => import('@/pages/TranslationsPage'));
 const HomepageContentPage = lazy(() => import('@/pages/content/HomepageContentPage'));
 const PagesListPage = lazy(() => import('@/pages/content/PagesListPage'));
@@ -44,6 +48,7 @@ export const router = createBrowserRouter([
     children: [
       { path: '/login', element: <LoginPage /> },
       { path: '/forgot-password', element: <ForgotPasswordPage /> },
+      { path: '/reset-password', element: <ResetPasswordPage /> },
     ],
   },
   {
@@ -64,6 +69,7 @@ export const router = createBrowserRouter([
       { path: '/inventory', element: <InventoryPage /> },
       { path: '/orders', element: <OrdersPage /> },
       { path: '/orders/:id', element: <OrderDetailPage /> },
+      { path: '/orders/payment-recoveries', element: <PaymentRecoveriesPage /> },
       { path: '/customers', element: <CustomersPage /> },
       { path: '/customers/:id', element: <CustomerDetailPage /> },
       { path: '/coupons', element: <CouponsPage /> },
@@ -72,6 +78,8 @@ export const router = createBrowserRouter([
       { path: '/help-center', element: <HelpPage /> },
       { path: '/returns', element: <ReturnsPage /> },
       { path: '/returns/:id', element: <ReturnDetailPage /> },
+      { path: '/exchanges', element: <ExchangesPage /> },
+      { path: '/exchanges/:id', element: <ExchangeDetailPage /> },
       { path: '/notifications', element: <NotificationsPage /> },
       { path: '/wallet/:customerId', element: <WalletDetailPage /> },
       { path: '/content/homepage', element: <HomepageContentPage /> },

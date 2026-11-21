@@ -129,6 +129,12 @@ export interface Product {
   categoryId: string;
   itemGroupId?: string | null;
   navLinkId?: string | null;
+  /** Optional collection this product belongs to (M-P1). */
+  collectionId?: string | null;
+  /** Optional barcode (EAN/UPC) for stock-taking (M-P1). */
+  barcode?: string | null;
+  /** Internal cost price in USD minor units (M-P1). Admin-only, never shown to shoppers. */
+  costPrice?: Minor | null;
   tags: string[];
   /** Default price for new variants (USD minor units). */
   basePrice: Minor;
@@ -163,7 +169,7 @@ export type ProductInput = Omit<Product, 'id' | 'createdAt' | 'updatedAt' | 'sta
 // Inventory
 // ---------------------------------------------------------------------------------------------
 
-export type AdjustmentReason = 'restock' | 'correction' | 'damaged' | 'returned' | 'order_cancelled' | 'other';
+export type AdjustmentReason = 'restock' | 'correction' | 'damaged' | 'returned' | 'order_cancelled' | 'other' | 'sale' | 'return_received' | 'exchange_shipped';
 export type AdjustmentMode = 'add' | 'remove' | 'set';
 
 export interface StockAdjustment {
@@ -292,6 +298,8 @@ export interface Order {
   refundedTotal: Minor;
   shippingMethod: { id: ShippingMethodId; label: string; minDays: number; maxDays: number };
   payment: { status: PaymentStatus; method: PaymentMethod; reference: string };
+  /** Every refund on this order with its real state — gateway id, method, status. */
+  refunds: OrderRefund[];
   fulfilment: {
     status: FulfilmentStatus;
     carrier: string | null;
@@ -302,6 +310,25 @@ export interface Order {
   };
   events: OrderEvent[];
   notes: OrderNote[];
+}
+
+export type RefundMethod = 'original' | 'manual_bank' | 'manual_upi' | 'store_credit';
+export type RefundStatus = 'pending' | 'processing' | 'completed' | 'failed';
+
+export interface OrderRefund {
+  id: string;
+  orderId: string;
+  returnId: string | null;
+  amount: Minor;
+  reason: string;
+  method: RefundMethod | string;
+  status: RefundStatus | string;
+  reference: string | null;
+  completedAt: ISODate | null;
+  failedAt: ISODate | null;
+  recordedBy: string | null;
+  note: string | null;
+  createdAt: ISODate;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -526,6 +553,8 @@ export interface ShippingSettings {
   zones: ShippingZone[];
   /** Shown at checkout for countries outside every zone; checkout is blocked for them. */
   unsupportedMessage: Localized;
+  /** Free-shipping order-value threshold in USD minor units; null = no threshold. */
+  freeShippingThreshold: Minor | null;
   updatedAt: ISODate;
 }
 

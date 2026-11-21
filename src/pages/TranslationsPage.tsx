@@ -4,12 +4,21 @@ import { translationsApi, type ContentLang, type TranslationRow } from '@/api';
 import { Button } from '@/components/ui/Button';
 import { EmptyState, ErrorState, Notice, Skeleton } from '@/components/ui/Feedback';
 import { PageHeader } from '@/components/ui/Page';
-import { usePageMeta } from '@/hooks/misc';
+import { useDebounced, usePageMeta } from '@/hooks/misc';
 import { useListParams } from '@/hooks/useListParams';
 import { invalidate, useQuery } from '@/hooks/useQuery';
 import { errorMessage } from '@/services/api';
 import { toast } from '@/store';
 import { cn } from '@/utils/misc';
+
+/** M-O16: the textarea id used to be `tr-<lang>-<first 20 chars of the source>`, so
+ *  two sources sharing a 20-character prefix produced duplicate IDs (and spaces in
+ *  an id are fragile). Hash the full source instead — unique per row, valid chars. */
+function sourceId(source: string): string {
+  let h = 5381;
+  for (let i = 0; i < source.length; i++) h = ((h << 5) + h + source.charCodeAt(i)) >>> 0;
+  return h.toString(36);
+}
 
 const LANGS: Array<{ code: ContentLang; label: string }> = [
   { code: 'de', label: 'Deutsch' },
@@ -57,11 +66,11 @@ function Row({ row, lang }: { row: TranslationRow; lang: ContentLang }) {
         </p>
       </div>
       <div className="min-w-0">
-        <label className="sr-only" htmlFor={`tr-${lang}-${row.source.slice(0, 20)}`}>
+        <label className="sr-only" htmlFor={`tr-${lang}-${sourceId(row.source)}`}>
           {LANGS.find((l) => l.code === lang)?.label} translation
         </label>
         <textarea
-          id={`tr-${lang}-${row.source.slice(0, 20)}`}
+          id={`tr-${lang}-${sourceId(row.source)}`}
           value={text}
           onChange={(e) => setText(e.target.value)}
           rows={long ? 4 : 2}
@@ -91,9 +100,12 @@ export default function TranslationsPage() {
   const lang = (LANGS.some((l) => l.code === f.lang) ? f.lang : 'de') as ContentLang;
   const status = f.status ?? 'all';
   const [search, setSearch] = useState(list.query.q ?? '');
+  // M-O16: live search — the URL updates as you type (replace) and the request is
+  // debounced 300ms, like every other list. (It used to apply only on submit/blur.)
+  const q = useDebounced(search, 300);
   const { data, isLoading, error, refetch } = useQuery(
-    `translations:${list.key}`,
-    () => translationsApi.fetchTranslations({ q: list.query.q || undefined, lang, status, page: list.query.page, pageSize: 25 }),
+    `translations:${lang}:${status}:${q}:${list.query.page}`,
+    () => translationsApi.fetchTranslations({ q: q || undefined, lang, status, page: list.query.page, pageSize: 25 }),
     { keepPrevious: true },
   );
 
@@ -134,14 +146,13 @@ export default function TranslationsPage() {
               <option value="missing">Missing only</option>
               <option value="translated">Translated only</option>
             </select>
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                list.update({ q: search });
-              }}
-            >
-              <input type="search" value={search} onChange={(e) => setSearch(e.target.value)} onBlur={() => list.update({ q: search })} placeholder="Search text or product" className="input h-9 w-56 py-1 text-[13px]" />
-            </form>
+            <input
+              type="search"
+              value={search}
+              onChange={(e) => { setSearch(e.target.value); list.update({ q: e.target.value }); }}
+              placeholder="Search text or product"
+              className="input h-9 w-56 py-1 text-[13px]"
+            />
           </div>
         </div>
 

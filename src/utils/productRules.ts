@@ -1,4 +1,5 @@
 import type { Category, Product, ProductInput, ProductOption, ProductVariant, ProductStatus } from '@/types';
+import { MAX_STOCK_PER_VARIANT } from './inventoryRules';
 import { SLUG_RE } from './misc';
 
 // Product business rules shared by the editor (instant feedback) and the mock service (authoritative check).
@@ -26,15 +27,26 @@ export function comboKey(combo: Record<string, string>, options: Pick<ProductOpt
 
 export function variantLabel(options: ProductOption[], variant: Pick<ProductVariant, 'options'>, lang: 'en' | 'hi' = 'en'): string | null {
   if (!options.length) return null;
-  const parts = options.map((o) => {
+  // L-I7: only resolved values are shown (no '?' placeholders). When the options
+  // exist but none resolve — e.g. the option was rebuilt after the variant was
+  // created — say so instead of returning null, which callers render as
+  // "Single variant". Mirrors the backend's inventory variantLabel exactly.
+  const parts = options.flatMap((o) => {
     const v = o.values.find((x) => x.id === variant.options[o.id]);
-    return v ? v.label[lang] || v.label.en : '?';
+    return v ? [v.label[lang] || v.label.en] : [];
   });
-  return parts.join(' / ');
+  return parts.length ? parts.join(' / ') : 'Variant options unavailable';
 }
 
 function skuPart(s: string): string {
   return s.toUpperCase().replace(/[^A-Z0-9]+/g, '').slice(0, 10) || 'X';
+}
+
+/** Short deterministic hash of the full (untruncated) SKU text, for disambiguation. */
+function skuHash(s: string): string {
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0;
+  return h.toString(36);
 }
 
 /**
@@ -58,15 +70,36 @@ export function syncVariants(
     const key = comboKey(complete(v), options);
     if (!byKey.has(key)) byKey.set(key, v);
   }
+  // M-P3: auto-SKUs must stay unique even when two option values share their first
+  // 10 characters (skuPart slices labels) or the 40-char cap truncates the tail.
+  // Seed with the SKUs that already exist so a generated SKU never clashes with one.
+  const usedSkus = new Set(existing.map((v) => v.sku.trim().toUpperCase()));
   return optionCombos(options).map((combo) => {
     const key = comboKey(combo, options);
     const found = byKey.get(key);
     if (found) return { ...found, options: combo };
     const values = options.map((o) => combo[o.id]);
     const valueLabels = options.map((o) => skuPart(o.values.find((v) => v.id === combo[o.id])?.label.en ?? combo[o.id]));
+    // Full, untruncated label text — the hash input, so labels that share a 10-char
+    // prefix still hash differently.
+    const fullKey = [defaults.skuPrefix, ...options.map((o) => (o.values.find((v) => v.id === combo[o.id])?.label.en ?? combo[o.id]).toUpperCase().replace(/[^A-Z0-9]+/g, ''))].filter(Boolean).join('-');
+    const full = [defaults.skuPrefix, ...valueLabels].filter(Boolean).join('-');
+    let sku = full.slice(0, 40);
+    if (usedSkus.has(sku) || full.length > 40) {
+      // Uppercase: SKUs must match SKU_RE (A-Z, 0-9, hyphens only).
+      const suffix = `-${skuHash(fullKey).toUpperCase()}`;
+      sku = `${full.slice(0, 40 - suffix.length)}${suffix}`;
+      let n = 2;
+      while (usedSkus.has(sku)) {
+        const retry = `-${n}`;
+        sku = `${full.slice(0, 40 - retry.length)}${retry}`;
+        n++;
+      }
+    }
+    usedSkus.add(sku);
     return {
       id: `${defaults.idPrefix}--${values.join('-') || 'default'}`,
-      sku: [defaults.skuPrefix, ...valueLabels].filter(Boolean).join('-').slice(0, 40),
+      sku,
       options: combo,
       price: defaults.price,
       salePrice: defaults.salePrice,
@@ -141,7 +174,7 @@ export function validateProduct(p: ProductInput, ctx: RuleContext): Issue[] {
       if (!label) add(`options.${oi}.values.${vi}.label.en`, 'Value label is required.');
       else if (labels.has(label)) add(`options.${oi}.values.${vi}.label.en`, 'Duplicate value in this option.');
       labels.add(label);
-      if (o.type === 'swatch' && v.swatch && !/^#[0-9a-fA-F]{6}$/.test(v.swatch)) add(`options.${oi}.values.${vi}.swatch`, 'Use a hex colour like #C04A17.');
+      if (o.type === 'swatch' && v.swatch && !/^#[0-9a-fA-F]{6}$/.test(v.swatch)) add(`options.${oi}.values.${vi}.swatch`, 'Use a hex colour like #A64B32.');
     });
   });
 
@@ -172,6 +205,7 @@ export function validateProduct(p: ProductInput, ctx: RuleContext): Issue[] {
       else if (v.salePrice >= v.price) add(`variants.${i}.salePrice`, 'Sale price must be lower than the price.');
     }
     if (!Number.isInteger(v.stock) || v.stock < 0) add(`variants.${i}.stock`, 'Stock must be a whole number, 0 or more.');
+    else if (v.stock > MAX_STOCK_PER_VARIANT) add(`variants.${i}.stock`, `Stock cannot be above ${MAX_STOCK_PER_VARIANT.toLocaleString('en-US')}.`);
     if (v.imageIds.some((id) => !imageIds.has(id))) add(`variants.${i}.imageIds`, 'Variant images must be chosen from the product images.');
   });
   if (p.options.length && seenCombos.size < expected.size) add('variants', 'Some option combinations have no variant. Regenerate variants.');

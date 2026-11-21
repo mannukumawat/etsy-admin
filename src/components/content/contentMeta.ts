@@ -28,9 +28,14 @@ export const PAGE_LABEL: Record<PageKey, string> = {
 
 export const isPageKey = (key: string | undefined): key is PageKey => !!key && (PAGE_KEYS as string[]).includes(key);
 
-/** Wording used in every publish confirmation: publishing is simulated inside the admin only. */
+/** Wording used in every publish confirmation when the admin runs in demo mode:
+ *  publishing is simulated inside the admin only. */
 export const PUBLISH_SIMULATION_TEXT =
   'This is an admin-preview simulation. It only copies the draft to the published version inside this admin. The storefront is a separate app and is NOT updated until backend integration, and everything here resets when you refresh.';
+
+/** Wording used in every publish confirmation in live mode: publishing is real. */
+export const PUBLISH_LIVE_TEXT =
+  'Publishing makes this version live on the storefront. The change is saved on the server and stays after a refresh.';
 
 export const LEGAL_NOTICE_TEXT =
   'Sample legal text. It must be reviewed by the store owner (and a legal adviser where needed) before launch. The storefront always shows these pages with a draft notice.';

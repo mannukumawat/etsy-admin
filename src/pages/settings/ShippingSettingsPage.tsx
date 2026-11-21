@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Controller, FormProvider, useFieldArray, useForm, useFormContext, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Link } from 'react-router-dom';
@@ -12,12 +12,12 @@ import { Badge, Notice } from '@/components/ui/Feedback';
 import { FieldError, SelectField, Switch, TextField } from '@/components/ui/Form';
 import { ContentLangProvider, LocalizedField } from '@/components/ui/LocalizedField';
 import { Card, PageHeader } from '@/components/ui/Page';
-import { usePageMeta } from '@/hooks/misc';
+import { usePageMeta, useSettings } from '@/hooks/misc';
 import { invalidate } from '@/hooks/useQuery';
 import { settingsService } from '@/services/settingsService';
 import { confirmAction, toast } from '@/store';
 import type { CurrencyConfig, Settings, ShippingMethodRate, ShippingSettings, StoreSettings } from '@/types';
-import { applyServerErrors, localized, num } from '@/utils/forms';
+import { applyServerErrors, localized, num, numOrNull } from '@/utils/forms';
 import { cn, newId, pluralize } from '@/utils/misc';
 import { formatUsd, toMajor, toMinor } from '@/utils/money';
 
@@ -59,8 +59,12 @@ const zoneSchema = z
 
 const schema = z
   .object({
-    zones: z.array(zoneSchema),
+    // L-S3: 1–20 zones, matching the backend — zero zones used to pass the form
+    // and a 21st zone failed server-side with a `zones` error no field could show.
+    zones: z.array(zoneSchema).min(1, 'Add at least one shipping zone.').max(20, 'At most 20 shipping zones.'),
     unsupportedMessage: localized(true, 300),
+    /** Free-shipping threshold in USD major units; null = no free shipping. */
+    freeShippingThreshold: z.number({ invalid_type_error: 'Enter an amount.' }).min(0, 'Cannot be negative.').max(1000000, 'Keep it under USD 1,000,000.').nullable(),
   })
   .superRefine((v, ctx) => {
     const names = new Map<string, number>();
@@ -86,6 +90,7 @@ const fromMethodForm = (m: Values['zones'][number]['standard']): ShippingMethodR
 const toForm = (s: ShippingSettings): Values => ({
   zones: s.zones.map((z) => ({ id: z.id, name: z.name, countries: [...z.countries], standard: toMethodForm(z.standard), express: toMethodForm(z.express) })),
   unsupportedMessage: { ...s.unsupportedMessage },
+  freeShippingThreshold: s.freeShippingThreshold != null ? toMajor(s.freeShippingThreshold) : null,
 });
 
 const newZone = () => ({
@@ -300,11 +305,12 @@ function ZoneCard({ index, zoneCount, currencies, handling, onRemove }: { index:
 
 function QuotePreview({ handling, currencies }: { handling: StoreSettings['handlingDays']; currencies: CurrencyConfig[] }) {
   const { control } = useFormContext<Values>();
-  const zones = useWatch({ control, name: 'zones' }) ?? [];
+  const watchedZones = useWatch({ control, name: 'zones' });
+  const zones = watchedZones ?? [];
   const message = useWatch({ control, name: 'unsupportedMessage' });
   const options = countryOptions();
   const [code, setCode] = useState(options[0]?.code ?? '');
-  const owner = useMemo(() => ownerMap(zones), [zones]);
+  const owner = useMemo(() => ownerMap(watchedZones ?? []), [watchedZones]);
   const zoneIndex = owner.get(code);
   const zone = zoneIndex !== undefined ? zones[zoneIndex] : undefined;
   const quotes = zone ? METHODS.map((m) => ({ ...m, rate: zone[m.key] })).filter((q) => q.rate?.enabled) : [];
@@ -338,10 +344,11 @@ function QuotePreview({ handling, currencies }: { handling: StoreSettings['handl
         ) : (
           <div className="space-y-2">
             <p className="text-xs text-ink-muted">
-              Zone “{zone.name || `Zone ${(zoneIndex ?? 0) + 1}`}” · handling {handling.min}–{handling.max} business days from{' '}
+              Zone “{zone.name || `Zone ${(zoneIndex ?? 0) + 1}`}” · handling {handling.min}–{handling.max} business days (from your saved{' '}
               <Link to="/settings/store" className="link">
                 store settings
               </Link>
+              )
             </p>
             <ul className="divide-y divide-sand-200 rounded-lg border border-sand-200">
               {quotes.map((q) => (
@@ -364,10 +371,40 @@ function QuotePreview({ handling, currencies }: { handling: StoreSettings['handl
   );
 }
 
+/** M-S2: free-shipping threshold. Empty = no free shipping; otherwise orders whose
+ *  goods subtotal (after discounts, before shipping/tax) reaches this USD value ship
+ *  free in every zone. Checkout enforces it server-side. */
+function FreeShippingSection() {
+  const { register, formState: { errors } } = useFormContext<Values>();
+  return (
+    <Card
+      title={
+        <span className="flex items-center gap-2">
+          <Truck className="h-4 w-4 text-ink-muted" aria-hidden />
+          Free shipping threshold
+        </span>
+      }
+      description="Offer free shipping on larger orders. Leave blank to always charge the zone rate."
+    >
+      <TextField
+        id="free-shipping-threshold"
+        type="number"
+        min={0}
+        step="0.01"
+        inputMode="decimal"
+        label="Free shipping on orders over (USD)"
+        hint="Compared with the goods subtotal after discounts, before shipping and tax. The amount is converted to the shopper's currency at checkout."
+        error={errors.freeShippingThreshold?.message}
+        {...register('freeShippingThreshold', { setValueAs: numOrNull })}
+      />
+    </Card>
+  );
+}
+
 function UnsupportedSection() {
   const { control } = useFormContext<Values>();
-  const zones = useWatch({ control, name: 'zones' }) ?? [];
-  const covered = useMemo(() => new Set(zones.flatMap((z) => z.countries)), [zones]);
+  const watchedZones = useWatch({ control, name: 'zones' });
+  const covered = useMemo(() => new Set((watchedZones ?? []).flatMap((z) => z.countries)), [watchedZones]);
   const missing = countryOptions().filter((c) => !covered.has(c.code));
 
   return (
@@ -479,6 +516,7 @@ function ShippingForm({ settings }: { settings: Settings }) {
       const saved = await settingsService.updateShipping({
         zones: v.zones.map((z) => ({ id: z.id, name: z.name.trim(), countries: z.countries, standard: fromMethodForm(z.standard), express: fromMethodForm(z.express) })),
         unsupportedMessage: v.unsupportedMessage,
+        freeShippingThreshold: v.freeShippingThreshold != null ? toMinor(v.freeShippingThreshold) : null,
       });
       reset(toForm(saved));
       invalidate('settings', 'dashboard', 'translation');
@@ -498,7 +536,12 @@ function ShippingForm({ settings }: { settings: Settings }) {
           <div className="min-w-0 space-y-5">
             <div>
               <h2 className="mb-1 text-sm font-semibold text-ink">Shipping zones</h2>
-              <p className="mb-3 text-xs text-ink-muted">Each zone is a group of countries with its own rates.</p>
+              <p className="mb-3 text-xs text-ink-muted">Each zone is a group of countries with its own rates. At least one zone is required, and at most 20.</p>
+              {/* L-S3: a zones-level error (zero zones, or more than 20) has no field
+                  of its own — show it here instead of only as a toast. */}
+              {typeof formState.errors.zones?.message === 'string' && (
+                <p className="mb-3 text-[13px] font-medium text-red-700" role="alert">{formState.errors.zones.message}</p>
+              )}
             </div>
             {fields.map((field, index) => (
               <ZoneCard
@@ -511,10 +554,14 @@ function ShippingForm({ settings }: { settings: Settings }) {
               />
             ))}
 
-            <Button variant="outline" onClick={() => append(newZone())} icon={<Plus className="h-4 w-4" aria-hidden />}>
+            {/* L-S3: the backend caps zones at 20 — stop at 20 instead of letting
+                the 21st zone fail on save. */}
+            <Button variant="outline" onClick={() => append(newZone())} disabled={fields.length >= 20} title={fields.length >= 20 ? 'At most 20 shipping zones.' : undefined} icon={<Plus className="h-4 w-4" aria-hidden />}>
               Add zone
             </Button>
+            {fields.length >= 20 && <p className="text-xs text-ink-muted">You have the maximum of 20 zones. Remove one to add another.</p>}
 
+            <FreeShippingSection />
             <UnsupportedSection />
           </div>
 
@@ -531,6 +578,18 @@ function ShippingForm({ settings }: { settings: Settings }) {
 
 export default function ShippingSettingsPage() {
   usePageMeta('Shipping', [{ label: 'Settings' }]);
+  // L-S10: the checkout preview's handling days come from the saved store settings
+  // (handling days are edited on the Store page, not here), so reload settings when
+  // this page opens — a cached copy could predate a save made in another tab, and
+  // the preview would quote the old handling window. This runs once, on mount,
+  // before any draft exists on this page, so it can never discard an edit.
+  const { refetch } = useSettings();
+  const refetched = useRef(false);
+  useEffect(() => {
+    if (refetched.current) return;
+    refetched.current = true;
+    refetch();
+  }, [refetch]);
   return (
     <ContentLangProvider>
       <PageHeader description="Decide where you ship, what customers pay, and how long delivery takes. Customers see this at checkout." />

@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
 import { Check, ImageOff, ImagePlus, Search, Upload, X } from 'lucide-react';
+import { API_MODE } from '@/api';
 import { invalidate, useQuery } from '@/hooks/useQuery';
 import { errorMessage } from '@/services/api';
 import { MEDIA_RULES, mediaService } from '@/services/contentServices';
@@ -33,7 +34,14 @@ export function useUploader(onUploaded?: (assets: MediaAsset[]) => void) {
       if (items.length) {
         const created = await mediaService.add(items);
         invalidate('media');
-        toast(`${created.length} image${created.length === 1 ? '' : 's'} added as local previews (not uploaded).`, 'success');
+        // H15: say what actually happened — in live mode uploads reach the server and
+        // are stored; only demo mode keeps them as local previews in this browser tab.
+        toast(
+          API_MODE
+            ? `${created.length} image${created.length === 1 ? '' : 's'} uploaded and saved.`
+            : `${created.length} image${created.length === 1 ? '' : 's'} added as local previews (not uploaded).`,
+          'success',
+        );
         onUploaded?.(created);
       }
     } catch (e) {
@@ -72,7 +80,11 @@ export function MediaPickerModal({ open, onClose, onSelect, multiple = false, in
       onClose={onClose}
       title={title}
       size="xl"
-      description="Uploads become local previews in this browser only — nothing is sent to a server."
+      description={
+        API_MODE
+          ? 'Uploads are saved to the server and available everywhere in the store.'
+          : 'Uploads become local previews in this browser only — nothing is sent to a server.'
+      }
       footer={
         <>
           <span className="mr-auto self-center text-xs text-ink-muted">{selected.length ? `${selected.length} selected` : 'Nothing selected'}</span>
@@ -181,6 +193,13 @@ export function ImageField({ label, value, onChange, hint, error, aspect = 'squa
 }
 
 export function LocalUploadNotice() {
+  if (API_MODE) {
+    return (
+      <Notice tone="info">
+        Uploaded images are <strong>saved on the server</strong> and stay available after a refresh. Deleting an image removes it everywhere it is used.
+      </Notice>
+    );
+  }
   return (
     <Notice tone="demo">
       Uploaded images are <strong>local previews</strong> held in this browser tab (object URLs). They are not uploaded to a server and disappear on refresh.

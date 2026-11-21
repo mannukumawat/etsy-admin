@@ -25,6 +25,10 @@ export interface AdminReturn {
   id: string;
   reference: string;
   orderId: string;
+  /** Real order number (e.g. YS-240501) for the list's Order column (M-O1). */
+  orderNumber?: string | null;
+  /** Order currency (e.g. USD) — amounts on the detail page are formatted in it (M-O4). */
+  currency?: string | null;
   lineId: string;
   variantId: string;
   requestedQty: number;
@@ -107,6 +111,11 @@ export function inspectReturn(id: string, data: { acceptedQty: number; rejectedQ
 
 export function processRefund(id: string, data: { amount: number; method: string; reference?: string; note?: string }): Promise<AdminReturn> {
   return apiClient.post<AdminReturn>(`/api/admin/returns/${encodeURIComponent(id)}/refund`, data);
+}
+
+/** Verify a pending manual (bank/UPI) refund: only now do the order totals move and the return become refunded. */
+export function verifyRefund(id: string): Promise<AdminReturn> {
+  return apiClient.post<AdminReturn>(`/api/admin/returns/${encodeURIComponent(id)}/refund/verify`, {});
 }
 
 export function addReturnNote(id: string, data: { body: string }): Promise<AdminReturn> {

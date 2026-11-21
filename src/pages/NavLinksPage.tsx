@@ -14,6 +14,7 @@ import { usePageMeta } from '@/hooks/misc';
 import { invalidate, useQuery } from '@/hooks/useQuery';
 import { navLinksApi, type AdminNavLink } from '@/api';
 import { applyServerErrors } from '@/utils/forms';
+import { errorMessage } from '@/services/api';
 import { toast } from '@/store';
 
 const schema = z.object({
@@ -83,6 +84,10 @@ export default function NavLinksPage() {
     try {
       await navLinksApi.reorderNavLinks(ids);
       invalidate('nav-links');
+    } catch (e) {
+      // M-O11: a failed reorder used to fail silently (try/finally, no catch) — the
+      // list never moved, with no explanation. Say so; the order is unchanged.
+      toast(`Could not move the link: ${errorMessage(e)}`, 'error');
     } finally {
       setReordering(false);
     }

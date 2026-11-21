@@ -1,8 +1,8 @@
-import { ImageOff } from 'lucide-react';
+import { ArrowRight, ImageOff } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Dialog';
 import { useSettings } from '@/hooks/misc';
-import type { HomepageContent, LanguageCode, MediaAsset } from '@/types';
+import type { CategoryWithCount, HomepageContent, LanguageCode, MediaAsset, Product } from '@/types';
 import { cn } from '@/utils/misc';
 import type { HomepageItemGroup } from './itemGroupSections';
 import { LText, MissingText, PreviewBanner } from './PreviewKit';
@@ -13,6 +13,8 @@ interface PreviewProps {
   values: HomepageContent;
   media: Map<string, MediaAsset>;
   itemSections: HomepageItemGroup[];
+  products?: Product[];
+  categories?: CategoryWithCount[];
 }
 
 function Img({ asset, className, alt }: { asset: MediaAsset | undefined; className?: string; alt?: string }) {
@@ -25,10 +27,43 @@ function Img({ asset, className, alt }: { asset: MediaAsset | undefined; classNa
   return <img src={asset.url} alt={alt ?? asset.alt.en} className={cn('object-cover', className)} />;
 }
 
-export function HomepagePreview({ open, onClose, values: v, media, itemSections }: PreviewProps) {
+export function HomepagePreview({ open, onClose, values: v, media, itemSections, products, categories }: PreviewProps) {
   const lang: LanguageCode = 'en';
   const { data: settings } = useSettings();
   const storeName = settings?.store.name ?? 'Your Store';
+  const byId = new Map((products ?? []).map((p) => [p.id, p]));
+  const byCatId = new Map((categories ?? []).map((c) => [c.id, c]));
+  // H13: the preview now also shows the featured/bestseller/new-arrival rows, the
+  // featured categories and the newsletter block, so the new editors can be checked.
+  const productRow = (title: string, ids: string[]) => {
+    if (!ids.length) return null;
+    const rows = ids.map((id) => byId.get(id)).filter((p): p is Product => !!p);
+    return (
+      <section className="border-t border-sand-200 px-4 py-6 sm:px-8" aria-label={title}>
+        <div className="mb-4 flex items-end justify-between gap-3 border-b border-sand-200 pb-3">
+          <h3 className="font-brand text-xl font-semibold text-ink">{title}</h3>
+          <span className="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-brand-700">View all <ArrowRight className="h-3.5 w-3.5" aria-hidden /></span>
+        </div>
+        {rows.length === 0 ? (
+          <p className="text-[13px] text-ink-muted">Products not loaded yet.</p>
+        ) : (
+          <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+            {rows.map((p) => {
+              const img = p.images[0] ? media.get(p.images[0].mediaId) : undefined;
+              return (
+                <li key={p.id} className="min-w-0">
+                  <Img asset={img} alt="" className="aspect-square w-full rounded-lg" />
+                  <p className="mt-1.5 overflow-hidden text-[13px] font-medium leading-snug text-ink" style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
+                    <LText value={p.name} lang={lang} />
+                  </p>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </section>
+    );
+  };
 
   return (
     <Modal
@@ -94,6 +129,35 @@ export function HomepagePreview({ open, onClose, values: v, media, itemSections 
           </section>
         )}
 
+        {/* Featured categories */}
+        {(v.featuredCategoryIds?.length ?? 0) > 0 && (
+          <section className="border-t border-sand-200 px-4 py-6 sm:px-8" aria-label="Featured categories">
+            <div className="mb-4 flex items-end justify-between gap-3 border-b border-sand-200 pb-3">
+              <h3 className="font-brand text-xl font-semibold text-ink">Featured categories</h3>
+            </div>
+            <ul className="flex flex-wrap gap-2">
+              {v.featuredCategoryIds!.map((id) => (
+                <li key={id} className="rounded-full border border-sand-300 bg-white px-3 py-1.5 text-[13px] font-medium text-ink">
+                  {byCatId.get(id)?.name.en ?? 'Missing category'}
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+
+        {productRow('Featured products', v.featuredProductIds ?? [])}
+        {productRow('Bestsellers', v.bestsellerProductIds ?? [])}
+        {productRow('New arrivals', v.newArrivalProductIds ?? [])}
+
+        {/* Newsletter */}
+        {(v.newsletter?.title.en || v.newsletter?.body.en) && (
+          <section className="border-t border-sand-200 bg-sand-50 px-4 py-6 text-center sm:px-8" aria-label="Newsletter">
+            <LText as="h3" value={v.newsletter.title} lang={lang} className="font-brand text-xl font-semibold text-ink" empty={<MissingText>Newsletter title missing</MissingText>} />
+            <LText as="p" value={v.newsletter.body} lang={lang} className="mx-auto mt-2 max-w-md text-sm text-ink-soft" />
+            <p className="mt-3 text-xs text-ink-muted">Email field + Subscribe button (storefront).</p>
+          </section>
+        )}
+
         {/* Item groups: one product row per group, same as the storefront */}
         {itemSections.length === 0 ? (
           <section className="border-t border-sand-200 px-4 py-6 text-[13px] text-ink-muted sm:px-8">No item group rows to show yet.</section>
@@ -102,7 +166,7 @@ export function HomepagePreview({ open, onClose, values: v, media, itemSections 
             <section key={group.id} className="border-t border-sand-200 px-4 py-6 sm:px-8" aria-label={group.nameEn}>
               <div className="mb-4 flex items-end justify-between gap-3 border-b border-sand-200 pb-3">
                 <h3 className="font-brand text-xl font-semibold text-ink">{group.nameEn}</h3>
-                <span className="shrink-0 text-xs font-medium text-brand-700">View all →</span>
+                <span className="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-brand-700">View all <ArrowRight className="h-3.5 w-3.5" aria-hidden /></span>
               </div>
               <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
                 {products.map((p) => {

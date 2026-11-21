@@ -1,5 +1,9 @@
 import type { AdjustmentMode, AdjustmentReason } from '@/types';
 
+/** L-I5: one stock cap for the whole system — the admin form, the adjust endpoint,
+ *  product saves and imports all use this value (backend: MAX_STOCK_PER_VARIANT). */
+export const MAX_STOCK_PER_VARIANT = 100_000;
+
 export type StockState = 'in' | 'low' | 'out';
 
 export function stockState(stock: number, lowThreshold: number): StockState {
@@ -15,6 +19,9 @@ export const ADJUSTMENT_REASONS: Array<{ value: AdjustmentReason; label: string;
   { value: 'returned', label: 'Customer return', manual: true },
   { value: 'other', label: 'Other (explain in note)', manual: true },
   { value: 'order_cancelled', label: 'Order cancelled — items restocked', manual: false },
+  { value: 'sale', label: 'Sale — order placed', manual: false },
+  { value: 'return_received', label: 'Return received — items restocked', manual: false },
+  { value: 'exchange_shipped', label: 'Exchange shipped', manual: false },
 ];
 
 export const reasonLabel = (r: AdjustmentReason) => ADJUSTMENT_REASONS.find((x) => x.value === r)?.label ?? r;
@@ -28,6 +35,6 @@ export function applyAdjustment(before: number, mode: AdjustmentMode, quantity: 
   else after = quantity;
   if (after < 0) return { error: `Stock cannot go below zero (only ${before} on hand).` };
   if (after === before) return { error: 'This adjustment does not change the stock level.' };
-  if (after > 100000) return { error: 'Stock above 100,000 is not supported.' };
+  if (after > MAX_STOCK_PER_VARIANT) return { error: `Stock above ${MAX_STOCK_PER_VARIANT.toLocaleString('en-US')} is not supported.` };
   return { after, delta: after - before };
 }

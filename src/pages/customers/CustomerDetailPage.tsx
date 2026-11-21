@@ -1,5 +1,5 @@
 import { Link, useParams } from 'react-router-dom';
-import { ArrowLeft, Mail, Phone, ShoppingBag, UserX } from 'lucide-react';
+import { ArrowLeft, Mail, Phone, ShoppingBag, UserX, Wallet } from 'lucide-react';
 import { CustomerKindBadge } from '@/components/orders/CustomerKindBadge';
 import { countryName, safeDecode } from '@/components/orders/orderDisplay';
 import { ButtonLink } from '@/components/ui/Button';
@@ -145,9 +145,16 @@ export default function CustomerDetailPage() {
           </div>
         }
         actions={
-          <ButtonLink to="/customers" size="sm" variant="ghost" icon={<ArrowLeft className="h-4 w-4" aria-hidden />}>
-            All customers
-          </ButtonLink>
+          <>
+            {!isGuest && (
+              <ButtonLink to={`/wallet/${summary.id}`} size="sm" variant="outline" icon={<Wallet className="h-4 w-4" aria-hidden />}>
+                View wallet
+              </ButtonLink>
+            )}
+            <ButtonLink to="/customers" size="sm" variant="ghost" icon={<ArrowLeft className="h-4 w-4" aria-hidden />}>
+              All customers
+            </ButtonLink>
+          </>
         }
       />
 

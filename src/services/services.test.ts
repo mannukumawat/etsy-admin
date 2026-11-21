@@ -71,6 +71,18 @@ describe('products', () => {
     expect(res.failed.map((f) => f.id)).toEqual(['p-table-runner']); // no image yet
     expect(res.updated).toEqual([copy.id]);
   });
+
+  it('deleteAll with filters deletes only the filtered set and keeps inventory history (H7)', async () => {
+    const adjustmentsBefore = db.adjustments.length;
+    const archivedBefore = db.products.filter((p) => p.status === 'archived').length;
+    expect(archivedBefore).toBeGreaterThan(0);
+    const res = await productService.deleteAll({ filters: { status: 'archived' } });
+    expect(res.deleted).toBe(archivedBefore);
+    expect(db.products.some((p) => p.status === 'archived')).toBe(false);
+    expect(db.products.length).toBeGreaterThan(0);
+    // History is an audit trail: deleting products never wipes it.
+    expect(db.adjustments.length).toBe(adjustmentsBefore);
+  });
 });
 
 describe('categories and inventory', () => {
@@ -113,6 +125,24 @@ describe('orders', () => {
     await expectApiError(orderService.cancel(target.id, { restock: true, refund: true, reason: 'again' }), 'conflict');
   });
 
+  it('records a manual refund as pending and only moves the totals once verified', async () => {
+    const target = db.orders.find((o) => o.payment.status === 'paid' && o.fulfilment.status === 'unfulfilled')!;
+    const before = target.refundedTotal;
+    await expectApiError(
+      orderService.refund(target.id, { amount: 100, reason: 'Bank transfer', method: 'manual_bank' }),
+      'validation',
+    );
+    const pending = await orderService.refund(target.id, { amount: 100, reason: 'Bank transfer', method: 'manual_bank', reference: 'UTR999' });
+    expect(pending.refunds.at(-1)).toMatchObject({ amount: 100, method: 'manual_bank', status: 'pending', reference: 'UTR999' });
+    // Totals do not move while the refund is pending.
+    expect(pending.refundedTotal).toBe(before);
+    const refundId = pending.refunds.at(-1)!.id;
+    const verified = await orderService.verifyRefund(target.id, refundId);
+    expect(verified.refunds.at(-1)).toMatchObject({ status: 'completed' });
+    expect(verified.refundedTotal).toBe(before + 100);
+    await expectApiError(orderService.verifyRefund(target.id, refundId), 'conflict');
+  });
+
   it('follows the fulfilment lifecycle and validates tracking', async () => {
     const o = db.orders.find((x) => x.payment.status === 'paid' && x.fulfilment.status === 'unfulfilled')!;
     await expectApiError(orderService.advance(o.id, 'shipped'), 'conflict');
@@ -121,8 +151,10 @@ describe('orders', () => {
     const shipped = await orderService.advance(o.id, 'shipped', { carrier: 'Demo Post', trackingNumber: 'DP55555', trackingUrl: 'https://tracking.example.com/DP55555' });
     expect(shipped.fulfilment).toMatchObject({ status: 'shipped', trackingNumber: 'DP55555' });
     await expectApiError(orderService.cancel(o.id, { restock: true, refund: true, reason: 'late' }), 'conflict');
-    const partial = await orderService.refund(o.id, { amount: 100, reason: 'Goodwill' });
+    const partial = await orderService.refund(o.id, { amount: 100, reason: 'Goodwill', method: 'original' });
     expect(partial.payment.status).toBe('partially_refunded');
+    expect(partial.refunds).toHaveLength(1);
+    expect(partial.refunds[0]).toMatchObject({ amount: 100, method: 'original', status: 'completed' });
     const unpaid = db.orders.find((x) => x.payment.status === 'unpaid');
     if (unpaid) await expectApiError(orderService.advance(unpaid.id, 'processing'), 'conflict');
   });
@@ -174,5 +206,19 @@ describe('customers, coupons, content, media, settings, dashboard', () => {
     const after = await dashboardService.metrics({ from: '2026-07-01', to: '2026-10-30' });
     expect(after.lowStockVariants).toBeGreaterThan(before.lowStockVariants);
     await expect(dashboardService.metrics({ from: '2026-10-30', to: '2026-10-01' })).rejects.toMatchObject({ code: 'validation' });
+  });
+
+  // L-S2/L-S3: the mock service enforces the same store-field bounds and shipping
+  // zone counts as the admin form and the backend, so a value can never pass one
+  // side and fail the other.
+  it('rejects store fields and shipping zone counts outside the shared bounds', async () => {
+    const store = structuredClone(db.settings.store);
+    await expect(settingsService.updateStore({ ...store, contact: { ...store.contact, phone: '1'.repeat(31) } })).rejects.toMatchObject({ code: 'validation' });
+    await expect(settingsService.updateStore({ ...store, contact: { ...store.contact, address: 'a'.repeat(241) } })).rejects.toMatchObject({ code: 'validation' });
+    await expect(settingsService.updateStore({ ...store, social: { ...store.social, instagram: 'http://instagram.com/yourstore' } })).rejects.toMatchObject({ code: 'validation' });
+    const ship = structuredClone(db.settings.shipping);
+    await expect(settingsService.updateShipping({ ...ship, zones: [] })).rejects.toMatchObject({ code: 'validation' });
+    const twentyOne = Array.from({ length: 21 }, (_, i) => ({ ...ship.zones[0], id: `zone-${i}`, name: `Zone ${i}` }));
+    await expect(settingsService.updateShipping({ ...ship, zones: twentyOne })).rejects.toMatchObject({ code: 'validation' });
   });
 });

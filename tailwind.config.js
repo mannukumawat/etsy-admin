@@ -7,9 +7,9 @@ export default {
     extend: {
       colors: {
         ivory: {
-          DEFAULT: '#FBF7F0',
+          DEFAULT: '#FAF7F2',
           50: '#FDFBF7',
-          100: '#FBF7F0',
+          100: '#FAF7F2',
           200: '#F4EDE2',
           300: '#EAE0D1',
         },
@@ -32,14 +32,14 @@ export default {
           300: '#EDA078',
           400: '#E2794A',
           500: '#D45F2A',
-          600: '#C04A17',
+          600: '#A64B32',
           700: '#9F3C14',
           800: '#7F3217',
           900: '#682B16',
         },
         // Chart series (validated against white/ivory surfaces).
         chart: {
-          1: '#C04A17',
+          1: '#A64B32',
           2: '#4C5A3D',
           3: '#3E5C8A',
           4: '#B08A2E',

@@ -18,6 +18,7 @@ import { usePageMeta, useSettings } from '@/hooks/misc';
 import { useListParams } from '@/hooks/useListParams';
 import { invalidate, useQuery } from '@/hooks/useQuery';
 import { ApiError, errorMessage } from '@/services/api';
+import { API_MODE } from '@/api';
 import { categoryService } from '@/services/catalogServices';
 import { productService } from '@/services/productService';
 import { couponService } from '@/services/salesServices';
@@ -578,8 +579,17 @@ function CouponTester({ control, coupon, products, categories, currencies }: { c
 
 export default function CouponsPage() {
   usePageMeta('Coupons', [{ label: 'Sales' }]);
-  const list = useListParams(['state']);
-  const { data, isLoading, isFetching, error, refetch } = useQuery('coupons', () => couponService.list());
+  const list = useListParams(['state'], { pageSize: 20 });
+  const page = list.query.page;
+  const q = (list.query.q ?? '').trim();
+  const stateFilter = list.query.filters?.state;
+  // M-O14: server pagination + filters — the whole list is no longer downloaded and
+  // filtered in the browser; search is debounced by useListParams like other lists.
+  const { data, isLoading, isFetching, error, refetch } = useQuery(
+    `coupons:${q}:${stateFilter ?? 'all'}:${page}`,
+    () => couponService.list({ q: q || undefined, state: stateFilter, page, pageSize: 20 }),
+    { keepPrevious: true },
+  );
   const { data: products } = useQuery('products:all', () => productService.all());
   const { data: categories } = useQuery('categories', () => categoryService.list());
   const { data: settings } = useSettings();
@@ -590,20 +600,17 @@ export default function CouponsPage() {
   const productName = useMemo(() => new Map((products ?? []).map((p) => [p.id, p.name.en])), [products]);
   const categoryName = useMemo(() => new Map((categories ?? []).map((c) => [c.id, c.name.en])), [categories]);
 
-  const q = (list.query.q ?? '').trim().toLowerCase();
-  const stateFilter = list.query.filters?.state;
-  const rows = useMemo(
-    () => data?.filter((c) => (!q || `${c.code} ${c.description}`.toLowerCase().includes(q)) && (!stateFilter || c.state === stateFilter)),
-    [data, q, stateFilter],
-  );
-  const counts = useMemo(() => {
-    const m = new Map<CouponState, number>();
-    (data ?? []).forEach((c) => m.set(c.state, (m.get(c.state) ?? 0) + 1));
-    return m;
-  }, [data]);
+  const rows = data?.items ?? [];
+  const counts = data?.stateCounts ?? {};
 
   const current = editing && editing !== 'new' ? editing : null;
-  const others = useMemo(() => (data ?? []).filter((c) => c.id !== current?.id), [data, current]);
+  // M-O14: with server paging `others` is only the current page — the form's live
+  // duplicate-code check is a hint only; the server (or mock save) still rejects
+  // a code that already exists anywhere.
+  // (The memo depends on the query result, not on `rows`: `rows` is `?? []`, a new
+  // array every render, which would defeat the memo.)
+  const items = data?.items;
+  const others = useMemo(() => (items ?? []).filter((c) => c.id !== current?.id), [items, current]);
 
   const refresh = () => invalidate('coupons', 'dashboard');
 
@@ -747,7 +754,11 @@ export default function CouponsPage() {
         description={
           <>
             <p>Discount codes shoppers enter at checkout. Values, caps and minimums are in USD, the base currency.</p>
-            <p className="mt-1">Codes saved here live in this admin preview only; the storefront keeps its built-in demo code until backend integration.</p>
+            <p className="mt-1">
+              {API_MODE
+                ? 'Codes saved here are live at checkout — the storefront validates them against this list.'
+                : 'Demo mode: codes saved here live in this admin preview only; the storefront keeps its built-in demo code.'}
+            </p>
           </>
         }
         actions={
@@ -761,7 +772,7 @@ export default function CouponsPage() {
           search={list.query.q ?? ''}
           onSearch={(value) => list.update({ q: value })}
           searchPlaceholder="Search code or description"
-          filters={[{ key: 'state', label: 'Status', options: STATE_OPTIONS.map((o) => ({ value: o.value, label: `${o.label} (${counts.get(o.value) ?? 0})` })) }]}
+          filters={[{ key: 'state', label: 'Status', options: STATE_OPTIONS.map((o) => ({ value: o.value, label: `${o.label} (${counts[o.value] ?? 0})` })) }]}
           values={list.query.filters}
           onFilter={(k, v) => list.update({ [k]: v })}
           activeCount={list.activeFilters}
@@ -776,8 +787,13 @@ export default function CouponsPage() {
           refreshing={isFetching && !isLoading}
           error={error}
           onRetry={refetch}
+          page={data?.page}
+          pageCount={data?.pageCount}
+          total={data?.total}
+          pageSize={data?.pageSize}
+          onPage={(p) => list.update({ page: p }, false)}
           empty={
-            data && data.length === 0 ? (
+            data && data.total === 0 ? (
               <EmptyState
                 icon={<TicketPercent className="h-6 w-6" aria-hidden />}
                 title="No coupons yet"

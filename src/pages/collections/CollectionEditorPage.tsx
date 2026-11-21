@@ -82,7 +82,7 @@ export default function CollectionEditorPage() {
   const navigate = useNavigate();
   usePageMeta(isNew ? 'New collection' : 'Edit collection', [{ label: 'Content' }, { label: 'Collections', to: '/collections' }]);
 
-  const { data: existing, isLoading, error } = useQuery(isNew ? null : `collection:${id}`, () => collectionsApi.fetchCollection(id!));
+  const { data: existing, isLoading, error, refetch } = useQuery(isNew ? null : `collection:${id}`, () => collectionsApi.fetchCollection(id!));
   const { data: products } = useQuery('products:all', () => productService.all());
   const { data: categories } = useQuery('categories', () => categoryService.list());
   const { map: media } = useMediaMap();
@@ -139,7 +139,7 @@ export default function CollectionEditorPage() {
   };
 
   if (!isNew && isLoading) return <Skeleton className="h-96" />;
-  if (!isNew && error) return <ErrorState error={error} onRetry={() => {}} />;
+  if (!isNew && error) return <ErrorState error={error} onRetry={() => refetch()} />;
 
   return (
     <ContentLangProvider>

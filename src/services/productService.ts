@@ -84,20 +84,46 @@ function listConfig(threshold: number): ListConfig<Product> {
   };
 }
 
+const ALL_PAGE_SIZE = 100;
+const ALL_MAX_PAGES = 10; // Safety cap: pickers never need more than 1,000 products at once.
+
 export const productService = {
+  /** H16: in live mode the list is paged, filtered and sorted on the server (the old
+   *  client-side runList over the whole catalogue was capped at 500 products). */
   list(query: ListQuery): Promise<ListResult<Product>> {
     const threshold = db.settings.store.lowStockThreshold;
     if (API_MODE) {
-      // The API returns the owner's whole catalogue; search/sort/paging stay client-side so the
-      // list UI behaves the same in both modes.
-      return productsApi.fetchProducts().then((items) => runList(items, query, listConfig(threshold)));
+      const f = query.filters ?? {};
+      return productsApi
+        .fetchProducts({
+          q: query.q || undefined,
+          status: f.status as ProductStatus | undefined,
+          category: f.category,
+          stock: f.stock as 'in' | 'low' | 'out' | undefined,
+          flag: f.flag as 'featured' | 'bestseller' | 'new' | undefined,
+          sort: (query.sort ?? 'updated') as 'name' | 'price' | 'stock' | 'updated' | 'order',
+          dir: query.dir ?? 'desc',
+          itemGroup: f.itemGroup,
+          page: query.page ?? 1,
+          pageSize: query.pageSize ?? 20,
+        })
+        .then((res) => ({ items: res.items, total: res.total ?? res.items.length, page: res.page ?? 1, pageSize: res.pageSize ?? 20, pageCount: res.pageCount ?? 1 }));
     }
     return mockRequest(() => runList(db.products, query, listConfig(threshold)));
   },
 
-  /** Lightweight full list for pickers (coupons, homepage sections). */
-  all(): Promise<Product[]> {
-    if (API_MODE) return productsApi.fetchProducts();
+  /** Lightweight full list for pickers (coupons, homepage sections). Fetches in pages
+   *  of 100 so it still works once the catalogue grows past a single page. */
+  async all(): Promise<Product[]> {
+    if (API_MODE) {
+      const items: Product[] = [];
+      for (let page = 1; page <= ALL_MAX_PAGES; page++) {
+        const res = await productsApi.fetchProducts({ page, pageSize: ALL_PAGE_SIZE, sort: 'updated', dir: 'desc' });
+        items.push(...res.items);
+        if (items.length >= (res.total ?? res.items.length) || res.items.length < ALL_PAGE_SIZE) break;
+      }
+      return items;
+    }
     return mockRequest(() => db.products, [80, 200]);
   },
 
@@ -140,6 +166,9 @@ export const productService = {
   },
 
   duplicate(id: string): Promise<Product> {
+    // H17: live mode duplicates on the server (fresh slug/SKUs, draft copy); the old
+    // mock-only path navigated to an id that 404s in live mode.
+    if (API_MODE) return productsApi.duplicateProduct(id);
     return mockRequest(() => {
       const src = find(id);
       const slugs = new Set(db.products.map((p) => p.slug));
@@ -171,17 +200,35 @@ export const productService = {
     });
   },
 
-  deleteAll(): Promise<{ ok: boolean }> {
-    if (API_MODE) return productsApi.deleteAllProducts();
+  /** H7: with a query only the filtered set is deleted. Inventory history is kept
+   *  (audit trail, like the server); media files are kept too. */
+  deleteAll(query?: ListQuery): Promise<{ ok: boolean; deleted: number }> {
+    if (API_MODE) {
+      const f = query?.filters ?? {};
+      return productsApi.deleteAllProducts({
+        q: query?.q || undefined,
+        status: f.status as ProductStatus | undefined,
+        category: f.category,
+        stock: f.stock as 'in' | 'low' | 'out' | undefined,
+        flag: f.flag as 'featured' | 'bestseller' | 'new' | undefined,
+        itemGroup: f.itemGroup,
+      });
+    }
     return mockRequest(() => {
-      db.products = [];
-      db.adjustments = [];
-      return { ok: true };
+      if (!query) {
+        const deleted = db.products.length;
+        db.products = [];
+        return { ok: true, deleted };
+      }
+      const { items } = runList(db.products, query, listConfig(db.settings.store.lowStockThreshold));
+      const ids = new Set(items.map((p) => p.id));
+      db.products = db.products.filter((p) => !ids.has(p.id));
+      return { ok: true, deleted: ids.size };
     });
   },
 
   /** Bulk status change. Activation re-validates each product; failures are reported, not thrown. */
-  setStatus(ids: string[], status: ProductStatus): Promise<{ updated: string[]; failed: Array<{ id: string; name: string; reason: string }> }> {
+  setStatus(ids: string[], status: ProductStatus, names: Record<string, string> = {}): Promise<{ updated: string[]; failed: Array<{ id: string; name: string; reason: string }> }> {
     if (API_MODE) {
       return Promise.all(
         ids.map((id) =>
@@ -192,7 +239,10 @@ export const productService = {
         ),
       ).then((results) => ({
         updated: results.filter((r) => r.ok).map((r) => r.id),
-        failed: results.filter((r) => !r.ok).map((r) => ({ id: r.id, name: r.id, reason: (r as { reason: string }).reason })),
+        // L-P1: a failed product is named by its product name, not its id — the
+        // caller passes the names it already has from the list; fall back to the
+        // id only when no name is known.
+        failed: results.filter((r) => !r.ok).map((r) => ({ id: r.id, name: names[r.id] ?? r.id, reason: (r as { reason: string }).reason })),
       }));
     }
     return mockRequest(() => {

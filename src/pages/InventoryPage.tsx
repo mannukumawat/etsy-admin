@@ -4,7 +4,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { Link, useSearchParams } from 'react-router-dom';
 import { z } from 'zod';
 import { ArrowRight, History, PackageSearch, SlidersHorizontal } from 'lucide-react';
-import { Button } from '@/components/ui/Button';
+import { Button, ButtonLink } from '@/components/ui/Button';
 import { DataTable, type Column } from '@/components/ui/DataTable';
 import { Modal } from '@/components/ui/Dialog';
 import { Badge, EmptyState, ErrorState, Notice, Skeleton } from '@/components/ui/Feedback';
@@ -12,10 +12,11 @@ import { FilterBar } from '@/components/ui/FilterBar';
 import { SelectField, TextareaField, TextField } from '@/components/ui/Form';
 import { PageHeader, Tabs } from '@/components/ui/Page';
 import { ProductStatusBadge, StockBadge } from '@/components/ui/StatusBadges';
-import { usePageMeta, useSettings } from '@/hooks/misc';
+import { usePageMeta, useSettings, useDebounced } from '@/hooks/misc';
 import { useListParams } from '@/hooks/useListParams';
 import { invalidate, useQuery } from '@/hooks/useQuery';
-import { errorMessage } from '@/services/api';
+import { inventoryApi } from '@/api';
+import { ApiError, errorMessage } from '@/services/api';
 import { categoryService, inventoryService } from '@/services/catalogServices';
 import { settingsService } from '@/services/settingsService';
 import { toast } from '@/store';
@@ -62,6 +63,15 @@ function AdjustModal({ row, onClose }: { row: InventoryRow; onClose: () => void 
       toast(`${row.sku}: ${adj.before} → ${adj.after}`, 'success');
       onClose();
     } catch (e) {
+      // L-I5: a 409 means the stock moved since this page loaded. The modal's
+      // preview is stale, so close it, refresh the list to the fresh stock, and
+      // say so — leaving the modal open on stale numbers invites a second 409.
+      if (e instanceof ApiError && e.code === 'conflict') {
+        invalidate('inventory', 'adjustments', 'dashboard');
+        toast('Stock changed since this page loaded. The list has been refreshed — please try the adjustment again.', 'error');
+        onClose();
+        return;
+      }
       applyServerErrors(e, setError);
     }
   };
@@ -126,6 +136,125 @@ function AdjustModal({ row, onClose }: { row: InventoryRow; onClose: () => void 
   );
 }
 
+
+function BulkAdjustModal({ rows, onClose }: { rows: InventoryRow[]; onClose: () => void }) {
+  // L-I4: adjust several variants at once instead of opening one modal per variant.
+  // The same mode/quantity/reason applies to every row; each row is adjusted with
+  // its own before→after preview, and a row that would go negative blocks the save.
+  const { register, handleSubmit, control, setError, setValue, formState } = useForm<AdjustValues>({
+    resolver: zodResolver(adjustSchema),
+    defaultValues: { mode: 'add', quantity: 1, reason: 'restock', note: '' },
+  });
+  const mode = useWatch({ control, name: 'mode' });
+  const quantity = useWatch({ control, name: 'quantity' });
+  const previews = rows.map((row) => ({ row, result: Number.isFinite(quantity) ? applyAdjustment(row.stock, mode, quantity) : { error: 'Enter a quantity.' } }));
+  const blocking = previews.find((p) => 'error' in p.result);
+  const [results, setResults] = useState<Array<{ sku: string; ok: boolean; message: string }> | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const onSubmit = async (v: AdjustValues) => {
+    const bad = previews.find((p) => 'error' in p.result);
+    if (bad) {
+      setError('quantity', { message: `${bad.row.sku}: ${(bad.result as { error: string }).error}` });
+      return;
+    }
+    setBusy(true);
+    const out: Array<{ sku: string; ok: boolean; message: string }> = [];
+    for (const { row } of previews) {
+      try {
+        const adj = await inventoryService.adjust({ variantId: row.variantId, ...v });
+        out.push({ sku: row.sku, ok: true, message: `${adj.before} → ${adj.after}` });
+      } catch (e) {
+        out.push({ sku: row.sku, ok: false, message: errorMessage(e) });
+      }
+    }
+    setResults(out);
+    setBusy(false);
+    invalidate('inventory', 'adjustments', 'products', 'product:', 'dashboard');
+    const failed = out.filter((r) => !r.ok).length;
+    toast(failed ? `${out.length - failed} of ${out.length} variants adjusted (${failed} failed).` : `${out.length} variant${out.length === 1 ? '' : 's'} adjusted.`, failed ? 'error' : 'success');
+  };
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={`Adjust stock — ${rows.length} variant${rows.length === 1 ? '' : 's'}`}
+      description="The same change is applied to every selected variant. Rows that cannot take the change are listed below."
+      footer={
+        results ? (
+          <Button variant="outline" onClick={onClose}>
+            Done
+          </Button>
+        ) : (
+          <>
+            <Button variant="outline" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button type="submit" form="bulk-adjust-form" loading={busy || formState.isSubmitting} disabled={!!blocking}>
+              Save adjustments
+            </Button>
+          </>
+        )
+      }
+    >
+      {results ? (
+        <ul className="space-y-2">
+          {results.map((r) => (
+            <li key={r.sku} className="flex items-center justify-between gap-3 rounded-lg border border-sand-200 px-3 py-2 text-[13px]">
+              <span className="font-mono">{r.sku}</span>
+              <span className={r.ok ? 'text-emerald-800' : 'text-red-700'}>{r.ok ? r.message : r.message}</span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <form id="bulk-adjust-form" onSubmit={handleSubmit(onSubmit)} noValidate className="space-y-4">
+          <fieldset>
+            <legend className="label">Change</legend>
+            <div className="inline-flex rounded-lg border border-sand-300 bg-white p-0.5" role="radiogroup">
+              {MODES.map((m) => (
+                <label key={m.value} className={cn('cursor-pointer rounded-md px-3 py-1.5 text-[13px] font-medium has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-brand-600', mode === m.value ? 'bg-ink text-white' : 'text-ink-soft')}>
+                  <input type="radio" value={m.value} className="sr-only" {...register('mode')} onChange={() => setValue('mode', m.value)} checked={mode === m.value} />
+                  {m.label}
+                </label>
+              ))}
+            </div>
+          </fieldset>
+          <TextField id="bulk-adj-qty" type="number" min={0} step={1} inputMode="numeric" label={mode === 'set' ? 'New stock level' : 'Quantity'} required error={formState.errors.quantity?.message} {...register('quantity', { setValueAs: num })} />
+          <SelectField id="bulk-adj-reason" label="Reason" required error={formState.errors.reason?.message} {...register('reason')}>
+            {ADJUSTMENT_REASONS.filter((r) => r.manual).map((r) => (
+              <option key={r.value} value={r.value}>
+                {r.label}
+              </option>
+            ))}
+          </SelectField>
+          <TextareaField id="bulk-adj-note" label="Note" rows={2} maxLength={300} hint="Required when the reason is “Other”. Shown in the adjustment history." error={formState.errors.note?.message} {...register('note')} />
+          <div className="overflow-x-auto rounded-lg border border-sand-200">
+            <table className="w-full text-[13px]">
+              <thead>
+                <tr className="border-b border-sand-200 text-left text-ink-muted">
+                  <th className="px-3 py-2 font-medium">SKU</th>
+                  <th className="px-3 py-2 text-right font-medium">On hand</th>
+                  <th className="px-3 py-2 text-right font-medium">After</th>
+                </tr>
+              </thead>
+              <tbody>
+                {previews.map(({ row, result }) => (
+                  <tr key={row.variantId} className="border-b border-sand-100 last:border-0">
+                    <td className="px-3 py-2 font-mono text-xs">{row.sku}</td>
+                    <td className="px-3 py-2 text-right num">{row.stock}</td>
+                    <td className="px-3 py-2 text-right num">{'error' in result ? <span className="text-red-700">{result.error}</span> : result.after}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </form>
+      )}
+    </Modal>
+  );
+}
+
 function ThresholdControl({ value }: { value: number }) {
   const [draft, setDraft] = useState(String(value));
   const [error, setError] = useState<string | null>(null);
@@ -173,9 +302,56 @@ function ThresholdControl({ value }: { value: number }) {
   );
 }
 
-function HistoryTable({ variantFilter }: { variantFilter?: string }) {
-  const [q, setQ] = useState('');
-  const { data, isLoading, error, refetch } = useQuery(`adjustments:${variantFilter ?? ''}:${q}`, () => inventoryService.history({ variantId: variantFilter, q, limit: 200 }), { keepPrevious: true });
+function HistoryTable() {
+  // M-I1: history is server-paged and filterable (reason / actor / date range / search)
+  // with a CSV export of the same filtered set — no more capped 500 rows sliced to 200.
+  // L-I4: the filters live in the URL (hq/hreason/hactor/hfrom/hto/hpage), so switching
+  // tabs keeps them, the view is shareable, and a stock row can deep-link here with
+  // ?tab=history&variant=<variantId> for one variant's history only.
+  const [params, setParams] = useSearchParams();
+  const variantFilter = params.get('variant') ?? '';
+  const q = params.get('hq') ?? '';
+  const reason = params.get('hreason') ?? '';
+  const actor = params.get('hactor') ?? '';
+  const from = params.get('hfrom') ?? '';
+  const to = params.get('hto') ?? '';
+  const page = Number(params.get('hpage') ?? '1') || 1;
+  // L-I3: the search is debounced (300ms) like other pages — no refetch per keystroke.
+  const debouncedQ = useDebounced(q, 300);
+  const debouncedActor = useDebounced(actor, 300);
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
+
+  const update = (patch: Record<string, string | undefined>) => {
+    const next = new URLSearchParams(params);
+    for (const [k, v] of Object.entries(patch)) {
+      if (v === undefined || v === '') next.delete(k);
+      else next.set(k, v);
+    }
+    if (!('hpage' in patch)) next.delete('hpage');
+    setParams(next, { replace: true });
+  };
+  const clearVariant = () => update({ variant: undefined });
+
+  const filter = { variantId: variantFilter, q: debouncedQ, reason: reason || undefined, actor: debouncedActor || undefined, from: from || undefined, to: to || undefined, page, pageSize: 25 };
+  const { data, isLoading, error, refetch } = useQuery(
+    `adjustments:${variantFilter}:${debouncedQ}:${reason}:${debouncedActor}:${from}:${to}:${page}`,
+    () => inventoryService.history(filter),
+    { keepPrevious: true },
+  );
+  const rows = data?.items ?? [];
+  const onExport = async () => {
+    setExporting(true);
+    setExportError(null);
+    try {
+      await inventoryApi.downloadAdjustmentHistoryCsv({ variantId: variantFilter, q: debouncedQ, reason: reason || undefined, actor: debouncedActor || undefined, from: from || undefined, to: to || undefined });
+      toast('Adjustment history downloaded.', 'success');
+    } catch {
+      setExportError('Could not download the adjustment history. Try again.');
+    } finally {
+      setExporting(false);
+    }
+  };
   const columns: Column<StockAdjustment>[] = [
     { key: 'date', header: 'Date', cell: (a) => <span className="whitespace-nowrap text-ink-muted">{formatDateTime(a.createdAt)}</span> },
     {
@@ -211,21 +387,65 @@ function HistoryTable({ variantFilter }: { variantFilter?: string }) {
   ];
   return (
     <div>
-      <div className="border-b border-sand-200 px-4 py-3">
-        <label htmlFor="history-q" className="sr-only">
-          Search history by SKU or product
-        </label>
-        <input id="history-q" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by SKU or product" className="input h-9 max-w-sm" />
+      <div className="flex flex-wrap items-end gap-3 border-b border-sand-200 px-4 py-3">
+        <div>
+          <label htmlFor="history-q" className="sr-only">
+            Search history by SKU or product
+          </label>
+          <input id="history-q" type="search" value={q} onChange={(e) => update({ hq: e.target.value })} placeholder="Search by SKU or product" className="input h-9 w-56" />
+        </div>
+        <div>
+          <label htmlFor="history-reason" className="sr-only">Filter by reason</label>
+          <select id="history-reason" value={reason} onChange={(e) => update({ hreason: e.target.value })} className="input h-9">
+            <option value="">All reasons</option>
+            {ADJUSTMENT_REASONS.map((r) => (
+              <option key={r.value} value={r.value}>{r.label}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label htmlFor="history-actor" className="sr-only">Filter by actor</label>
+          <input id="history-actor" type="search" value={actor} onChange={(e) => update({ hactor: e.target.value })} placeholder="Actor (email or name)" className="input h-9 w-48" />
+        </div>
+        <div className="flex items-center gap-1.5">
+          <label htmlFor="history-from" className="sr-only">From date</label>
+          <input id="history-from" type="date" value={from} onChange={(e) => update({ hfrom: e.target.value })} className="input h-9" />
+          <span className="text-xs text-ink-muted">to</span>
+          <label htmlFor="history-to" className="sr-only">To date</label>
+          <input id="history-to" type="date" value={to} onChange={(e) => update({ hto: e.target.value })} className="input h-9" />
+        </div>
+        <div className="ml-auto">
+          <Button variant="outline" size="sm" onClick={() => void onExport()} loading={exporting}>
+            Export CSV
+          </Button>
+        </div>
       </div>
+      {variantFilter && (
+        <div className="flex items-center gap-2 border-b border-sand-200 bg-brand-50/60 px-4 py-2 text-[13px]">
+          <History className="h-4 w-4 text-ink-muted" aria-hidden />
+          <span>
+            Showing history for <strong className="font-mono">{rows[0]?.sku ?? 'this variant'}</strong> only.
+          </span>
+          <Button variant="ghost" size="xs" onClick={clearVariant}>
+            Show all history
+          </Button>
+        </div>
+      )}
+      {exportError && <p className="px-4 pt-3 text-[13px] text-red-700" role="alert">{exportError}</p>}
       {error && !data ? (
         <ErrorState error={error} onRetry={refetch} />
       ) : (
         <DataTable
           caption="Stock adjustment history"
           columns={columns}
-          rows={data}
+          rows={rows}
           getRowId={(a) => a.id}
           loading={isLoading}
+          page={data?.page}
+          pageCount={data?.pageCount}
+          total={data?.total}
+          pageSize={data?.pageSize}
+          onPage={(p) => update({ hpage: String(p) })}
           empty={<EmptyState icon={<History className="h-6 w-6" aria-hidden />} title="No adjustments recorded" />}
         />
       )}
@@ -238,11 +458,21 @@ export default function InventoryPage() {
   const [params, setParams] = useSearchParams();
   const tab = params.get('tab') === 'history' ? 'history' : 'stock';
   const list = useListParams(['stock', 'category', 'status'], { sort: 'stock', dir: 'asc', pageSize: 25 });
-  const { data, isLoading, isFetching, error, refetch } = useQuery(`inventory:list:${list.key}`, () => inventoryService.list(list.query), { keepPrevious: true });
   const { data: settings, isLoading: settingsLoading } = useSettings();
+  // M-I2: the live threshold drives the list filter, the badges and the Dashboard —
+  // it is read from settings here and passed down, never from the seed.
+  const threshold = settings?.store.lowStockThreshold ?? 5;
+  const { data, isLoading, isFetching, error, refetch } = useQuery(`inventory:list:${list.key}:${threshold}`, () => inventoryService.list(list.query, threshold), { keepPrevious: true });
   const { data: categories } = useQuery('categories', () => categoryService.list());
   const [adjusting, setAdjusting] = useState<InventoryRow | null>(null);
-  const threshold = settings?.store.lowStockThreshold ?? 5;
+  // L-I4: bulk adjust selection (page-scoped — changing page or filters clears it,
+  // so the bulk modal only ever acts on rows visible here).
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkAdjusting, setBulkAdjusting] = useState(false);
+  useEffect(() => {
+    setSelected(new Set());
+  }, [list.key]);
+  const selectedRows = (data?.items ?? []).filter((r) => selected.has(r.variantId));
   const catName = useMemo(() => new Map((categories ?? []).map((c) => [c.id, c.name.en])), [categories]);
 
   const columns: Column<InventoryRow>[] = [
@@ -277,15 +507,22 @@ export default function InventoryPage() {
         </div>
       ),
     },
-    { key: 'adjusted', header: 'Last adjusted', sortKey: 'adjusted', hideBelow: 'xl', cell: (r) => <span className="text-ink-muted">{r.lastAdjustedAt ? formatDateTime(r.lastAdjustedAt) : '—'}</span> },
+    { key: 'adjusted', header: 'Last adjusted', hideBelow: 'xl', cell: (r) => <span className="text-ink-muted">{r.lastAdjustedAt ? formatDateTime(r.lastAdjustedAt) : '—'}</span> },
     {
       key: 'actions',
       header: <span className="sr-only">Actions</span>,
       align: 'right',
       cell: (r) => (
-        <Button size="xs" variant="outline" onClick={() => setAdjusting(r)} icon={<SlidersHorizontal className="h-3.5 w-3.5" aria-hidden />} aria-label={`Adjust stock for ${r.sku}`}>
-          Adjust
-        </Button>
+        <div className="flex items-center justify-end gap-2">
+          {/* L-I4: the per-variant history path was dead (HistoryTable never received
+              a variantFilter). Each row now links to its own filtered history. */}
+          <ButtonLink to={`/inventory?tab=history&variant=${r.variantId}`} variant="ghost" size="xs" aria-label={`View history for ${r.sku}`} title="View history">
+            <History className="h-3.5 w-3.5" aria-hidden />
+          </ButtonLink>
+          <Button size="xs" variant="outline" onClick={() => setAdjusting(r)} icon={<SlidersHorizontal className="h-3.5 w-3.5" aria-hidden />} aria-label={`Adjust stock for ${r.sku}`}>
+            Adjust
+          </Button>
+        </div>
       ),
     },
   ];
@@ -299,7 +536,14 @@ export default function InventoryPage() {
         className="mb-4"
         label="Inventory views"
         value={tab}
-        onChange={(id) => setParams(id === 'history' ? { tab: 'history' } : {}, { replace: true })}
+        // L-I4: switching tabs used to replace the whole query string, wiping the
+        // other tab's filters (and the stock list's). Only the `tab` param changes.
+        onChange={(id) => {
+          const next = new URLSearchParams(params);
+          if (id === 'history') next.set('tab', 'history');
+          else next.delete('tab');
+          setParams(next, { replace: true });
+        }}
         tabs={[
           { id: 'stock', label: 'Stock levels' },
           { id: 'history', label: 'Adjustment history' },
@@ -327,8 +571,23 @@ export default function InventoryPage() {
           />
           {list.query.filters?.stock === 'low' && (
             <Notice tone="info" className="m-4 mb-0">
-              Showing variants with 1–{threshold} units. Out-of-stock variants have their own filter.
+              {threshold === 0
+                ? 'The low-stock threshold is 0, so no variant counts as low stock. Raise the threshold to flag items running low.'
+                : `Showing variants with 1–${threshold} units. Out-of-stock variants have their own filter.`}
             </Notice>
+          )}
+          {selectedRows.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2 border-b border-sand-200 bg-brand-50/60 px-4 py-2 text-[13px]" role="region" aria-label="Bulk actions">
+              <span>
+                <strong>{selectedRows.length}</strong> variant{selectedRows.length === 1 ? '' : 's'} selected on this page.
+              </span>
+              <Button size="xs" variant="outline" onClick={() => setBulkAdjusting(true)} icon={<SlidersHorizontal className="h-3.5 w-3.5" aria-hidden />}>
+                Adjust selected
+              </Button>
+              <Button size="xs" variant="ghost" onClick={() => setSelected(new Set())}>
+                Clear selection
+              </Button>
+            </div>
           )}
           <DataTable
             caption="Inventory by variant"
@@ -342,6 +601,8 @@ export default function InventoryPage() {
             sort={list.query.sort}
             dir={list.query.dir}
             onSort={list.toggleSort}
+            selected={selected}
+            onSelectedChange={setSelected}
             page={data?.page}
             pageCount={data?.pageCount}
             total={data?.total}
@@ -352,6 +613,15 @@ export default function InventoryPage() {
         </div>
       )}
       {adjusting && <AdjustModal row={adjusting} onClose={() => setAdjusting(null)} />}
+      {bulkAdjusting && selectedRows.length > 0 && (
+        <BulkAdjustModal
+          rows={selectedRows}
+          onClose={() => {
+            setBulkAdjusting(false);
+            setSelected(new Set());
+          }}
+        />
+      )}
     </>
   );
 }

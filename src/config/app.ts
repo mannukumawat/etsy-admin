@@ -1,6 +1,8 @@
 import {
   MessageSquareText,
+  ArrowLeftRight,
   BadgePercent,
+  Bell,
   BookOpen,
   Boxes,
   FileText,
@@ -27,8 +29,11 @@ import {
 
 export const APP = {
   name: 'Your Store Admin',
-  /** The storefront is a separate app; admin changes do NOT update it in this phase. */
+  /** The storefront is a separate app that reads from the same backend, so in live
+   *  mode admin changes reach it (it may need a page refresh to show them). */
   storefrontUrl: (import.meta.env.VITE_STOREFRONT_URL as string | undefined) || 'http://localhost:5173',
+  /** Shown only in demo mode (no backend): changes stay in this admin preview and
+   *  reset on refresh. In live mode the admin is connected to the backend. */
   demoBanner: 'Demo mode — changes stay in this admin preview and reset on refresh. The storefront is not updated.',
 };
 
@@ -37,6 +42,8 @@ export interface NavItem {
   label: string;
   icon: LucideIcon;
   end?: boolean;
+  /** H12: live badge fed by a query key (see AdminLayout's NavList). */
+  badge?: 'unreadNotifications';
 }
 
 export interface NavGroup {
@@ -64,7 +71,9 @@ export const NAV: NavGroup[] = [
       { to: '/coupons', label: 'Coupons', icon: BadgePercent },
       { to: '/reviews', label: 'Reviews', icon: MessageSquareText },
       { to: '/returns', label: 'Returns', icon: RotateCcw },
+      { to: '/exchanges', label: 'Exchanges', icon: ArrowLeftRight },
       { to: '/contacts', label: 'Messages', icon: Inbox },
+      { to: '/notifications', label: 'Notifications', icon: Bell, badge: 'unreadNotifications' },
     ],
   },
   {

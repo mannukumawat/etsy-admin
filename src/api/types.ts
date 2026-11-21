@@ -6,6 +6,9 @@ import type { AdjustmentMode, AdjustmentReason, AdminUser, CategoryWithCount, In
 export interface ListEnvelope<T> {
   items: T[];
   total?: number;
+  page?: number;
+  pageSize?: number;
+  pageCount?: number;
 }
 
 export type ProductListResponse = ListEnvelope<Product>;
@@ -27,6 +30,14 @@ export interface LoginRequest {
 export interface AdminProductListParams {
   q?: string;
   status?: ProductStatus;
+  category?: string;
+  stock?: 'in' | 'low' | 'out';
+  flag?: 'featured' | 'bestseller' | 'new';
+  sort?: 'name' | 'price' | 'stock' | 'updated' | 'order';
+  dir?: 'asc' | 'desc';
+  itemGroup?: string;
+  page?: number;
+  pageSize?: number;
 }
 
 /** `PATCH /api/admin/products/:id/status` */

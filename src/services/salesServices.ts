@@ -19,10 +19,12 @@ import {
 import { variantLabel } from '@/utils/productRules';
 import { ApiError, mockRequest, validationError } from './api';
 import { API_MODE, couponsApi, customersApi, ordersApi } from '@/api';
+import type { CouponList } from '@/api/coupons';
 import { ADMIN_ACTOR, db, nowIso } from './db';
 import { runList } from './query';
 
-// All payment and refund actions here are SIMULATIONS. No payment provider is called and no money moves.
+// In demo mode all payment and refund actions here are SIMULATIONS: no payment provider
+// is called and no money moves. In live mode (API_MODE) refunds go through Razorpay for real.
 
 // ---------------------------------------------------------------------------------------------
 // Orders — future API: /api/admin/orders, /api/admin/orders/:id/{fulfilment,cancel,refunds,notes,tracking}
@@ -64,7 +66,8 @@ function orderListConfig() {
 
 export const orderService = {
   list(query: ListQuery): Promise<ListResult<Order>> {
-    if (API_MODE) return ordersApi.fetchOrders().then((items) => runList(items, query, orderListConfig()));
+    // Live mode: the server paginates, filters and sorts (no 500-order client load).
+    if (API_MODE) return ordersApi.fetchOrders(query);
     return mockRequest(() => runList(db.orders, query, orderListConfig()));
   },
 
@@ -112,7 +115,7 @@ export const orderService = {
     });
   },
 
-  /** Cancel before shipping. Optionally restock items and (simulated) refund the remaining paid amount. */
+  /** Cancel before shipping. Optionally restock items and refund the remaining paid amount (real refund in live mode). */
   cancel(id: string, opts: { restock: boolean; refund: boolean; reason: string }): Promise<Order> {
     if (API_MODE) return ordersApi.cancelOrder(id, opts);
     return mockRequest(() => {
@@ -158,16 +161,102 @@ export const orderService = {
     });
   },
 
-  refund(id: string, opts: { amount: number; reason: string }): Promise<Order> {
+  /** L-I6: "Restock now" for an order cancelled without restock — the same exactly-once
+   *  restock the cancel flow does, available afterwards instead of only at cancel time. */
+  restock(id: string): Promise<Order> {
+    if (API_MODE) return ordersApi.restockOrder(id);
+    return mockRequest(() => {
+      const o = findOrder(id);
+      if (o.fulfilment.status !== 'cancelled') throw new ApiError('conflict', 'Only a cancelled order can be restocked.');
+      if (o.fulfilment.restocked) throw new ApiError('conflict', 'This order was already restocked.');
+      for (const line of o.lines) {
+        const product = db.products.find((p) => p.id === line.productId);
+        const variant = product?.variants.find((v) => v.id === line.variantId);
+        if (!product || !variant) continue; // product deleted since — nothing to restock
+        const adj: StockAdjustment = {
+          id: newId('adj'),
+          productId: product.id,
+          variantId: variant.id,
+          sku: variant.sku,
+          productName: product.name.en,
+          variantLabel: variantLabel(product.options, variant),
+          before: variant.stock,
+          after: variant.stock + line.quantity,
+          delta: line.quantity,
+          reason: 'order_cancelled',
+          note: `Order ${o.number} cancelled.`,
+          createdAt: nowIso(),
+          actor: ADMIN_ACTOR,
+        };
+        variant.stock = adj.after;
+        db.adjustments.unshift(adj);
+      }
+      o.fulfilment.restocked = true;
+      log(o, 'restock', 'Items returned to stock.');
+      return o;
+    });
+  },
+
+  refund(
+    id: string,
+    opts: { amount: number; reason: string; method: 'original' | 'manual_bank' | 'manual_upi' | 'store_credit'; reference?: string; note?: string },
+  ): Promise<Order> {
     if (API_MODE) return ordersApi.refundOrder(id, opts);
     return mockRequest(() => {
       const o = findOrder(id);
       const error = checkRefund(o, opts.amount);
       if (error) throw validationError([{ path: 'amount', message: error }]);
       if (!opts.reason.trim()) throw validationError([{ path: 'reason', message: 'Give a reason for the refund.' }]);
+      if ((opts.method === 'manual_bank' || opts.method === 'manual_upi') && !opts.reference?.trim()) {
+        throw validationError([{ path: 'reference', message: 'A bank/UPI reference is required for a manual refund.' }]);
+      }
+      // A pending manual refund does not move the totals — like the server, they only
+      // move once the refund is verified (verifyRefund). So remember the pre-refund
+      // totals and restore them for manual methods.
+      const prevStatus = o.payment.status;
+      const prevRefunded = o.refundedTotal;
       o.payment.status = paymentAfterRefund(o, opts.amount);
       o.refundedTotal += opts.amount;
+      // Demo only: record the refund like the server would, so the refunds card shows it.
+      const at = nowIso();
+      const isManual = opts.method === 'manual_bank' || opts.method === 'manual_upi';
+      o.refunds.push({
+        id: newId('rfnd'),
+        orderId: o.id,
+        returnId: null,
+        amount: opts.amount,
+        reason: opts.reason.trim(),
+        method: opts.method,
+        status: isManual ? 'pending' : 'completed',
+        reference: opts.method === 'original' ? `DEMO-RFND-${o.number}` : opts.reference?.trim() ?? null,
+        completedAt: isManual ? null : at,
+        failedAt: null,
+        recordedBy: ADMIN_ACTOR,
+        note: opts.note?.trim() || null,
+        createdAt: at,
+      });
+      if (isManual) {
+        o.payment.status = prevStatus;
+        o.refundedTotal = prevRefunded;
+      }
       log(o, 'refund', `Refunded ${fmt(o, opts.amount)} — ${opts.reason.trim()} (simulated — no money moved).`);
+      return o;
+    });
+  },
+
+  /** Verify a pending manual refund in demo mode (live mode verifies on the server). */
+  verifyRefund(id: string, refundId: string): Promise<Order> {
+    if (API_MODE) return ordersApi.verifyRefund(id, refundId);
+    return mockRequest(() => {
+      const o = findOrder(id);
+      const refund = o.refunds.find((r) => r.id === refundId);
+      if (!refund) throw new ApiError('not_found', 'Refund not found.');
+      if (refund.status !== 'pending') throw new ApiError('conflict', `This refund is already '${refund.status}'.`);
+      refund.status = 'completed';
+      refund.completedAt = nowIso();
+      o.payment.status = paymentAfterRefund(o, refund.amount);
+      o.refundedTotal += refund.amount;
+      log(o, 'refund', `Manual refund of ${fmt(o, refund.amount)} verified (ref ${refund.reference ?? '—'}).`);
       return o;
     });
   },
@@ -280,9 +369,32 @@ function checkCouponInput(input: CouponInput, selfId?: string) {
 }
 
 export const couponService = {
-  list(): Promise<Array<Coupon & { state: ReturnType<typeof couponState> }>> {
-    if (API_MODE) return couponsApi.fetchCoupons();
-    return mockRequest(() => db.coupons.map((c) => ({ ...c, state: couponState(c) })).sort((a, b) => a.code.localeCompare(b.code)), [120, 300]);
+  /** M-O14: server paginates/filters in live mode; mock mode filters + paginates locally. */
+  list(query: { q?: string; state?: string; page?: number; pageSize?: number } = {}): Promise<CouponList> {
+    if (API_MODE) return couponsApi.fetchCoupons(query);
+    return mockRequest(() => {
+      const q = (query.q ?? '').trim().toLowerCase();
+      const all = db.coupons
+        .map((c) => ({ ...c, state: couponState(c) }))
+        .filter((c) => (!q || `${c.code} ${c.description}`.toLowerCase().includes(q)) && (!query.state || c.state === query.state))
+        .sort((a, b) => a.code.localeCompare(b.code));
+      const stateCounts: Record<string, number> = {};
+      db.coupons.forEach((c) => {
+        const s = couponState(c);
+        stateCounts[s] = (stateCounts[s] ?? 0) + 1;
+      });
+      const pageSize = Math.min(100, Math.max(1, query.pageSize ?? 20));
+      const pageCount = Math.max(1, Math.ceil(all.length / pageSize));
+      const page = Math.min(Math.max(1, query.page ?? 1), pageCount);
+      return {
+        items: all.slice((page - 1) * pageSize, page * pageSize),
+        total: all.length,
+        page,
+        pageSize,
+        pageCount,
+        stateCounts,
+      };
+    }, [120, 300]);
   },
 
   create(input: CouponInput): Promise<Coupon> {

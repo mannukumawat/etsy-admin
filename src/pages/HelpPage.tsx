@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { BookOpen, ChevronRight, FileText, FolderOpen, Pencil, Plus, Trash2 } from 'lucide-react';
+import { ArrowLeft, BookOpen, ChevronRight, CreditCard, FileText, FolderOpen, HelpCircle, Package, Pencil, Plus, RefreshCw, Search, Settings, ShoppingBag, Star, Trash2, Truck, type LucideIcon } from 'lucide-react';
 import { helpApi, type HelpArticle, type HelpCategory } from '@/api';
 import { Button } from '@/components/ui/Button';
 import { DataTable, type Column } from '@/components/ui/DataTable';
@@ -13,7 +13,7 @@ import { PageHeader } from '@/components/ui/Page';
 import { usePageMeta } from '@/hooks/misc';
 import { invalidate, useQuery } from '@/hooks/useQuery';
 import { errorMessage } from '@/services/api';
-import { toast } from '@/store';
+import { confirmAction, toast } from '@/store';
 
 // ── Schemas ────────────────────────────────────────────────────────────────
 
@@ -49,6 +49,23 @@ const ICON_OPTIONS = [
   { value: 'shopping-bag', label: 'Shopping Bag' },
   { value: 'star', label: 'Star / Reviews' },
 ];
+
+/** M-O5: render the stored icon name as a real Lucide icon instead of the raw string. */
+const ICON_BY_NAME: Record<string, LucideIcon> = {
+  'help-circle': HelpCircle,
+  package: Package,
+  truck: Truck,
+  'credit-card': CreditCard,
+  'refresh-cw': RefreshCw,
+  settings: Settings,
+  'shopping-bag': ShoppingBag,
+  star: Star,
+};
+
+export function HelpCategoryIcon({ name, className = 'h-4 w-4' }: { name: string; className?: string }) {
+  const Icon = ICON_BY_NAME[name] ?? HelpCircle;
+  return <Icon className={className} aria-hidden />;
+}
 
 // ── Category Form Drawer ───────────────────────────────────────────────────
 
@@ -153,6 +170,7 @@ function ArticleDrawer({ catId, article, onClose }: { catId: string; article: He
         <TextareaField label="Body (English)" required rows={12} hint="Plain text. Paragraphs separated by blank lines." error={errors.bodyEn?.message} {...register('bodyEn')} />
         <TextareaField label="Body (Hindi)" rows={6} error={errors.bodyHi?.message} {...register('bodyHi')} />
         <TextField label="Position" type="number" hint="Lower = shown first" error={errors.position?.message} {...register('position')} />
+        <CheckboxField label="Active (visible on storefront)" {...register('isActive')} />
       </form>
     </Drawer>
   );
@@ -163,11 +181,26 @@ function ArticleDrawer({ catId, article, onClose }: { catId: string; article: He
 function ArticlesPanel({ cat, onBack }: { cat: HelpCategory; onBack: () => void }) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [articleToEdit, setArticleToEdit] = useState<HelpArticle | null>(null);
+  const [search, setSearch] = useState('');
 
-  const { data, isLoading } = useQuery(`help:articles:${cat.id}`, () => helpApi.listArticles(cat.id));
+  const { data, isLoading, error, refetch } = useQuery(`help:articles:${cat.id}`, () => helpApi.listArticles(cat.id));
+
+  const articles = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    const items = data?.items ?? [];
+    if (!q) return items;
+    return items.filter((a) => `${a.title.en} ${a.title.hi} ${a.slug}`.toLowerCase().includes(q));
+  }, [data, search]);
 
   const handleDelete = async (a: HelpArticle) => {
-    if (!confirm(`Delete "${a.title.en}"?`)) return;
+    // M-O5: shared confirm dialog, not the native window.confirm().
+    const ok = await confirmAction({
+      title: `Delete “${a.title.en}”?`,
+      body: 'This article will be removed from the Help Center. This can’t be undone.',
+      confirmLabel: 'Delete article',
+      tone: 'danger',
+    });
+    if (!ok) return;
     try {
       await helpApi.deleteArticle(cat.id, a.id);
       invalidate(`help:articles:${cat.id}`);
@@ -189,6 +222,11 @@ function ArticlesPanel({ cat, onBack }: { cat: HelpCategory; onBack: () => void 
     { key: 'slug', header: 'Slug', cell: (a) => <code className="text-xs text-ink-soft">{a.slug}</code> },
     { key: 'pos', header: 'Pos', cell: (a) => <span className="text-sm text-ink-muted">{a.position}</span> },
     {
+      key: 'active',
+      header: 'Status',
+      cell: (a) => <span className={`text-xs font-medium ${a.isActive ? 'text-green-700' : 'text-ink-muted'}`}>{a.isActive ? 'Active' : 'Hidden'}</span>,
+    },
+    {
       key: 'actions',
       header: '',
       cell: (a) => (
@@ -202,23 +240,31 @@ function ArticlesPanel({ cat, onBack }: { cat: HelpCategory; onBack: () => void 
 
   return (
     <div>
-      <div className="mb-4 flex items-center justify-between gap-4">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-2">
-          <button type="button" onClick={onBack} className="text-sm text-brand-600 hover:underline">← All categories</button>
+          <button type="button" onClick={onBack} className="inline-flex items-center gap-1 text-sm text-brand-600 hover:underline"><ArrowLeft className="h-4 w-4" aria-hidden /> All categories</button>
           <ChevronRight className="h-4 w-4 text-ink-faint" aria-hidden />
           <span className="text-sm font-medium text-ink">{cat.name.en}</span>
         </div>
-        <Button size="sm" icon={<Plus className="h-4 w-4" />} onClick={() => { setArticleToEdit(null); setDrawerOpen(true); }}>
-          New article
-        </Button>
+        <div className="flex items-center gap-2">
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ink-faint" aria-hidden />
+            <input type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search articles" aria-label="Search articles" className="input h-9 w-56 pl-8" />
+          </div>
+          <Button size="sm" icon={<Plus className="h-4 w-4" />} onClick={() => { setArticleToEdit(null); setDrawerOpen(true); }}>
+            New article
+          </Button>
+        </div>
       </div>
       <DataTable
         caption={`Articles in ${cat.name.en}`}
         columns={columns}
-        rows={data?.items}
+        rows={articles}
         getRowId={(a) => a.id}
         loading={isLoading}
-        empty={<EmptyState icon={<FileText className="h-8 w-8" />} title="No articles" body="Add the first article to this category." />}
+        error={error}
+        onRetry={refetch}
+        empty={<EmptyState icon={<FileText className="h-8 w-8" />} title={search ? 'No articles match' : 'No articles'} body={search ? 'Try a different search term.' : 'Add the first article to this category.'} />}
       />
       {drawerOpen && (
         <ArticleDrawer
@@ -238,11 +284,28 @@ export default function HelpPage() {
   const [catDrawerOpen, setCatDrawerOpen] = useState(false);
   const [editingCat, setEditingCat] = useState<HelpCategory | null>(null);
   const [selectedCat, setSelectedCat] = useState<HelpCategory | null>(null);
+  const [search, setSearch] = useState('');
 
-  const { data, isLoading } = useQuery('help:categories', () => helpApi.listCategories());
+  // M-O5: the categories query used to ignore errors entirely — a failed load showed
+  // an empty table with no retry.
+  const { data, isLoading, error, refetch } = useQuery('help:categories', () => helpApi.listCategories());
+
+  const categories = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    const items = data?.items ?? [];
+    if (!q) return items;
+    return items.filter((c) => `${c.name.en} ${c.name.hi} ${c.slug}`.toLowerCase().includes(q));
+  }, [data, search]);
 
   const handleDeleteCat = async (cat: HelpCategory) => {
-    if (!confirm(`Delete category "${cat.name.en}" and ALL its articles?`)) return;
+    // M-O5: shared confirm dialog, not the native window.confirm().
+    const ok = await confirmAction({
+      title: `Delete category “${cat.name.en}”?`,
+      body: 'The category and ALL its articles will be removed from the Help Center. This can’t be undone.',
+      confirmLabel: 'Delete category',
+      tone: 'danger',
+    });
+    if (!ok) return;
     try {
       await helpApi.deleteCategory(cat.id);
       invalidate('help:categories');
@@ -262,7 +325,7 @@ export default function HelpPage() {
       ),
     },
     { key: 'slug', header: 'Slug', cell: (c) => <code className="text-xs text-ink-soft">{c.slug}</code> },
-    { key: 'icon', header: 'Icon', cell: (c) => <span className="text-sm text-ink-soft">{c.icon}</span> },
+    { key: 'icon', header: 'Icon', cell: (c) => <HelpCategoryIcon name={c.icon} /> },
     { key: 'pos', header: 'Pos', cell: (c) => <span className="text-sm text-ink-muted">{c.position}</span> },
     {
       key: 'active',
@@ -297,18 +360,26 @@ export default function HelpPage() {
       <PageHeader
         description="Manage Help Center categories and articles shown at /help on the storefront."
         actions={
-          <Button icon={<Plus className="h-4 w-4" />} onClick={() => { setEditingCat(null); setCatDrawerOpen(true); }}>
-            New category
-          </Button>
+          <div className="flex items-center gap-2">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ink-faint" aria-hidden />
+              <input type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search categories" aria-label="Search categories" className="input h-9 w-56 pl-8" />
+            </div>
+            <Button icon={<Plus className="h-4 w-4" />} onClick={() => { setEditingCat(null); setCatDrawerOpen(true); }}>
+              New category
+            </Button>
+          </div>
         }
       />
       <DataTable
         caption="Help categories"
         columns={catColumns}
-        rows={data?.items}
+        rows={categories}
         getRowId={(c) => c.id}
         loading={isLoading}
-        empty={<EmptyState icon={<BookOpen className="h-8 w-8" />} title="No categories" body="Create the first help category to get started." />}
+        error={error}
+        onRetry={refetch}
+        empty={<EmptyState icon={<BookOpen className="h-8 w-8" />} title={search ? 'No categories match' : 'No categories'} body={search ? 'Try a different search term.' : 'Create the first help category to get started.'} />}
       />
       {catDrawerOpen && (
         <CategoryDrawer

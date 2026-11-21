@@ -201,6 +201,13 @@ function CurrencyForm({ settings }: { settings: Settings }) {
   useUnsavedChangesGuard(isDirty);
   const [refreshing, setRefreshing] = useState(false);
   const anyLive = base.some((c) => c.code !== 'USD' && c.autoRate);
+  // L-S6: warn when the displayed rates are over a week old — prices in INR/EUR/GBP
+  // are converted from these numbers, so stale rates mean stale prices. A recent
+  // live-rate check suppresses the warning: the rates were verified even if no
+  // value changed (ratesUpdatedAt only moves when a rate actually changes).
+  const ratesAgeDays = (Date.now() - new Date(settings.currencies.ratesUpdatedAt).getTime()) / 86_400_000;
+  const lastCheckAgeDays = settings.currencies.autoSyncAt ? (Date.now() - new Date(settings.currencies.autoSyncAt).getTime()) / 86_400_000 : null;
+  const ratesStale = ratesAgeDays > 7 && !(anyLive && lastCheckAgeDays !== null && lastCheckAgeDays <= 7);
 
   const refreshNow = async () => {
     setRefreshing(true);
@@ -270,7 +277,11 @@ function CurrencyForm({ settings }: { settings: Settings }) {
           <Notice tone="info" title={anyLive ? 'Live rates are on' : 'All rates are typed by hand'}>
             {anyLive ? (
               <>
-                Currencies set to <strong>Live</strong> refresh automatically about every 6 hours from a public exchange-rate feed
+                {/* L-S1: the old copy said "about every 6 hours", which is only true on a
+                    long-running server. On the hosted deployment the rates refresh once a
+                    day (03:00 UTC); say both, so neither deployment is misdescribed. */}
+                Currencies set to <strong>Live</strong> refresh automatically from a public exchange-rate feed — once a day at 03:00 UTC on the hosted deployment,
+                or about every 6 hours on a long-running server
                 {settings.currencies.autoSyncAt ? ` (last check ${formatDateTime(settings.currencies.autoSyncAt)})` : ' (no check has run yet)'}. <strong>Manual</strong> currencies never change on their
                 own.
               </>
@@ -279,6 +290,12 @@ function CurrencyForm({ settings }: { settings: Settings }) {
             )}{' '}
             Orders already placed keep the rate captured at checkout, so a rate change never alters order history.
           </Notice>
+          {ratesStale && (
+            <Notice tone="warning" title="Rates may be out of date">
+              These rates were last changed {formatDateTime(settings.currencies.ratesUpdatedAt)} — over a week ago. Prices shown in INR, EUR and GBP are converted
+              from these numbers, so they may no longer match the market. {anyLive ? 'Use “Refresh rates now” to fetch the latest rates.' : 'Switch the currencies to Live and save, or type in current rates and save.'}
+            </Notice>
+          )}
           {anyLive && settings.currencies.autoSyncError && (
             <Notice tone="warning" title="Last live update had a problem">
               {settings.currencies.autoSyncError} The previous rates are still in use.

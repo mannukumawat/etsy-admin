@@ -7,6 +7,7 @@ import { PublishBadge } from '@/components/ui/StatusBadges';
 import { usePageMeta } from '@/hooks/misc';
 import { useQuery } from '@/hooks/useQuery';
 import { contentService, hasUnpublishedChanges } from '@/services/contentServices';
+import { API_MODE } from '@/api';
 import type { PageDoc } from '@/types';
 import { formatDateTime } from '@/utils/dates';
 
@@ -53,8 +54,9 @@ export default function PagesListPage() {
           <div className="max-w-3xl space-y-1">
             <p>Storefront information pages and policies, edited as drafts in English. Shopper translations are on the Translations page.</p>
             <p>
-              Publishing here is an admin-preview simulation: the storefront (a separate app) keeps its own copy until backend integration. Policy pages contain sample text that must be reviewed
-              before launch.
+              {API_MODE
+                ? 'Publishing here updates the live storefront content. Policy pages contain sample text that must be reviewed before launch.'
+                : 'Publishing here is an admin-preview simulation: the storefront (a separate app) keeps its own copy in demo mode. Policy pages contain sample text that must be reviewed before launch.'}
             </p>
           </div>
         }

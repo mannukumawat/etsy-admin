@@ -28,3 +28,10 @@ export function countryOptions(): Array<{ code: string; name: string }> {
   if (!sorted) sorted = COUNTRIES.map((c) => ({ code: c.code, name: countryName(c.code) })).sort((a, b) => a.name.localeCompare(b.name));
   return sorted;
 }
+
+/** L-S4: the known regions (states/provinces) for a country, if the bundled country
+ *  list defines them (US states, Indian states, Canadian provinces, …). Empty means
+ *  the region stays free text. */
+export function regionOptions(countryCode: string): string[] {
+  return COUNTRY_BY_CODE[countryCode]?.format.region?.options ?? [];
+}

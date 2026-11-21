@@ -1,9 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { CheckCheck, Inbox, Mail, MailOpen, Trash2 } from 'lucide-react';
 import { contactsApi, type AdminContact, type ContactStatus } from '@/api';
 import { Button } from '@/components/ui/Button';
 import { DataTable, type Column } from '@/components/ui/DataTable';
-import { ConfirmDialog } from '@/components/ui/Dialog';
+import { ConfirmDialog, Modal } from '@/components/ui/Dialog';
 import { Badge, EmptyState, Notice, type BadgeTone } from '@/components/ui/Feedback';
 import { FilterBar } from '@/components/ui/FilterBar';
 import { PageHeader } from '@/components/ui/Page';
@@ -28,10 +28,31 @@ const SUBJECT_LABELS: Record<string, string> = {
 };
 
 function ContactDetailPanel({ contact, onClose }: { contact: AdminContact; onClose: () => void }) {
-  const [currentStatus] = useState<ContactStatus>(contact.status);
+  // M-O6: shared Modal (focus trap, Lucide close button, overlay) instead of the
+  // hand-rolled overlay with a literal ✕. The status is re-read from the server on
+  // open, so "Save note" can no longer overwrite a status changed elsewhere with
+  // the stale value captured when the row was clicked.
+  const [currentStatus, setCurrentStatus] = useState<ContactStatus>(contact.status);
   const [note, setNote] = useState(contact.note ?? '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    contactsApi
+      .getContact(contact.id)
+      .then((fresh) => {
+        if (cancelled) return;
+        setCurrentStatus(fresh.status);
+        setNote(fresh.note ?? '');
+      })
+      .catch(() => {
+        // Keep the list's copy; the save below will surface any real failure.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [contact.id]);
 
   const save = async (nextStatus?: ContactStatus) => {
     setSaving(true);
@@ -49,53 +70,52 @@ function ContactDetailPanel({ contact, onClose }: { contact: AdminContact; onClo
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4">
-      <div className="card flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden">
-        <div className="flex items-start justify-between border-b border-sand-200 bg-ivory px-6 py-4">
-          <div>
-            <p className="font-semibold text-ink">{contact.name}</p>
-            <p className="text-sm text-ink-soft">{contact.email}</p>
-          </div>
-          <div className="flex items-center gap-2">
-            <Badge tone={STATUS_COLORS[contact.status]}>{contact.status}</Badge>
-            <button type="button" onClick={onClose} className="ml-2 rounded p-1 text-ink-muted hover:bg-sand-100" aria-label="Close">✕</button>
-          </div>
-        </div>
-        <div className="flex-1 overflow-y-auto p-6 space-y-4 text-sm">
-          <div className="grid grid-cols-2 gap-4 rounded-lg bg-ivory p-4 text-xs text-ink-soft">
-            <div><span className="font-medium text-ink">Subject</span><br />{SUBJECT_LABELS[contact.subject] ?? contact.subject}</div>
-            {contact.orderNumber && <div><span className="font-medium text-ink">Order</span><br />{contact.orderNumber}</div>}
-            <div><span className="font-medium text-ink">Received</span><br />{formatDate(contact.createdAt)}</div>
-          </div>
-          <div className="rounded-lg border border-sand-200 p-4 text-ink-soft whitespace-pre-wrap leading-relaxed">
-            {contact.message}
-          </div>
-          <div>
-            <label className="mb-1.5 block font-medium text-ink">Internal note</label>
-            <textarea
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-              rows={3}
-              maxLength={2000}
-              placeholder="Private note for your team..."
-              className="input min-h-[80px] resize-y py-2"
-            />
-          </div>
-          {error && <Notice tone="error">{error}</Notice>}
-        </div>
-        <div className="flex items-center justify-between gap-3 border-t border-sand-200 px-6 py-4">
+    <Modal
+      open
+      onClose={onClose}
+      size="lg"
+      title={contact.name}
+      description={
+        <span>
+          {contact.email} · <Badge tone={STATUS_COLORS[currentStatus]}>{currentStatus}</Badge>
+        </span>
+      }
+      footer={
+        <>
           <Button variant="ghost" size="sm" onClick={onClose}>Cancel</Button>
-          <div className="flex gap-2">
-            {contact.status !== 'replied' && (
-              <Button variant="outline" size="sm" loading={saving} onClick={() => save('replied')} icon={<CheckCheck className="h-3.5 w-3.5" />}>
-                Mark replied
-              </Button>
-            )}
-            <Button size="sm" loading={saving} onClick={() => save()}>Save note</Button>
-          </div>
+          {currentStatus !== 'replied' && (
+            <Button variant="outline" size="sm" loading={saving} onClick={() => save('replied')} icon={<CheckCheck className="h-3.5 w-3.5" />}>
+              Mark replied
+            </Button>
+          )}
+          <Button size="sm" loading={saving} onClick={() => save()}>Save note</Button>
+        </>
+      }
+    >
+      <div className="space-y-4 text-sm">
+        <div className="grid grid-cols-2 gap-4 rounded-lg bg-ivory p-4 text-xs text-ink-soft">
+          <div><span className="font-medium text-ink">Subject</span><br />{SUBJECT_LABELS[contact.subject] ?? contact.subject}</div>
+          {contact.orderNumber && <div><span className="font-medium text-ink">Order</span><br />{contact.orderNumber}</div>}
+          <div><span className="font-medium text-ink">Received</span><br />{formatDate(contact.createdAt)}</div>
         </div>
+        <div className="rounded-lg border border-sand-200 p-4 text-ink-soft whitespace-pre-wrap leading-relaxed">
+          {contact.message}
+        </div>
+        <div>
+          <label className="mb-1.5 block font-medium text-ink" htmlFor="contact-note">Internal note</label>
+          <textarea
+            id="contact-note"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            rows={3}
+            maxLength={2000}
+            placeholder="Private note for your team..."
+            className="input min-h-[80px] resize-y py-2"
+          />
+        </div>
+        {error && <Notice tone="error">{error}</Notice>}
       </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -135,7 +155,7 @@ export default function ContactsPage() {
   const f = list.query.filters ?? {};
   const { data, isLoading, isFetching, error } = useQuery(
     `contacts:list:${list.key}`,
-    () => contactsApi.listContacts({ status: f.status, page: list.query.page }),
+    () => contactsApi.listContacts({ status: f.status, page: list.query.page, q: list.query.q || undefined }),
     { keepPrevious: true },
   );
 
@@ -145,7 +165,10 @@ export default function ContactsPage() {
       try {
         await contactsApi.getContact(contact.id);
         invalidate('contacts');
-      } catch {}
+      } catch (e) {
+        // M-O6: a failed mark-read used to be swallowed silently; say so instead.
+        toast(`Could not mark this message as read: ${errorMessage(e)}`, 'error');
+      }
     }
   };
 
@@ -175,7 +198,8 @@ export default function ContactsPage() {
     {
       key: 'message',
       header: 'Message',
-      cell: (r) => <p className="max-w-xs truncate text-sm text-ink-soft">{r.message}</p>,
+      // Reviews-style long-text handling: expandable instead of a hard truncate.
+      cell: (r) => <p className="max-w-xs text-sm text-ink-soft line-clamp-2" title={r.message}>{r.message}</p>,
     },
     {
       key: 'status_badge',
@@ -205,7 +229,7 @@ export default function ContactsPage() {
       <FilterBar
         search={list.query.q ?? ''}
         onSearch={(q) => list.update({ q })}
-        searchPlaceholder="Search by name or email…"
+        searchPlaceholder="Search name, email, subject, message or order number…"
         filters={[
           {
             key: 'status',

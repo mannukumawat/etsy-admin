@@ -1,9 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Controller, FormProvider, useFieldArray, useForm, useFormContext, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { Calculator, Plus, Receipt, Trash2 } from 'lucide-react';
-import { countryName, countryOptions } from '@/components/settings/countryNames';
+import { countryName, countryOptions, regionOptions } from '@/components/settings/countryNames';
 import { CurrencyExamples, onInvalidForm, SettingsActionBar, SettingsGate, SettingsScopeNotice, useUnsavedChangesGuard } from '@/components/settings/SettingsKit';
 import { Button } from '@/components/ui/Button';
 import { EmptyState, Notice } from '@/components/ui/Feedback';
@@ -12,6 +12,7 @@ import { Card, DefinitionList, PageHeader } from '@/components/ui/Page';
 import { usePageMeta } from '@/hooks/misc';
 import { invalidate } from '@/hooks/useQuery';
 import { settingsService } from '@/services/settingsService';
+import { API_MODE } from '@/api';
 import { confirmAction, toast } from '@/store';
 import type { CurrencyConfig, Settings, TaxSettings } from '@/types';
 import { applyServerErrors, num } from '@/utils/forms';
@@ -57,10 +58,26 @@ function RuleRow({ index, onRemove }: { index: number; onRemove: () => void }) {
   const {
     register,
     control,
+    setValue,
     formState: { errors },
   } = useFormContext<Values>();
   const err = errors.rules?.[index];
   const country = useWatch({ control, name: `rules.${index}.country` });
+  const region = useWatch({ control, name: `rules.${index}.region` });
+  // L-S4: for countries with a known region list (US states, Indian states, …)
+  // the region is picked from that list instead of free text, so a rule can never
+  // be saved as "california" while checkout sends "California". A saved region
+  // that matches a list entry in a different case is normalised to the list
+  // spelling; one that matches nothing is cleared when the country changes.
+  const regions = regionOptions(country ?? '');
+  const prevCountry = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (prevCountry.current === country) return;
+    prevCountry.current = country;
+    if (!regions.length || !region?.trim()) return;
+    const canonical = regions.find((r) => r.toLowerCase() === region.trim().toLowerCase());
+    setValue(`rules.${index}.region`, canonical ?? '', { shouldDirty: true });
+  }, [country, region, regions, index, setValue]);
 
   return (
     <li className="grid gap-3 px-3 py-3 sm:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_6rem_minmax(0,1fr)_auto] sm:items-start">
@@ -71,15 +88,32 @@ function RuleRow({ index, onRemove }: { index: number; onRemove: () => void }) {
           </option>
         ))}
       </SelectField>
-      <TextField
-        label="Region"
-        hideLabel={index > 0}
-        maxLength={60}
-        placeholder="All regions"
-        aria-label={`Region for ${countryName(country ?? '')}`}
-        error={err?.region?.message}
-        {...register(`rules.${index}.region`)}
-      />
+      {regions.length ? (
+        <SelectField
+          label="Region"
+          hideLabel={index > 0}
+          aria-label={`Region for ${countryName(country ?? '')}`}
+          error={err?.region?.message}
+          {...register(`rules.${index}.region`)}
+        >
+          <option value="">All regions</option>
+          {regions.map((r) => (
+            <option key={r} value={r}>
+              {r}
+            </option>
+          ))}
+        </SelectField>
+      ) : (
+        <TextField
+          label="Region"
+          hideLabel={index > 0}
+          maxLength={60}
+          placeholder="All regions"
+          aria-label={`Region for ${countryName(country ?? '')}`}
+          error={err?.region?.message}
+          {...register(`rules.${index}.region`)}
+        />
+      )}
       <TextField
         label="Rate"
         hideLabel={index > 0}
@@ -141,14 +175,25 @@ function TaxPreview({ currencies }: { currencies: CurrencyConfig[] }) {
     >
       <div className="grid gap-3 sm:grid-cols-3">
         <TextField label="Amount" prefix="USD" type="number" inputMode="decimal" min={0} step={0.01} value={amount} onChange={(e) => setAmount(e.target.value)} />
-        <SelectField label="Country" value={country} onChange={(e) => setCountry(e.target.value)}>
+        <SelectField label="Country" value={country} onChange={(e) => { setCountry(e.target.value); setRegion(''); }}>
           {options.map((o) => (
             <option key={o.code} value={o.code}>
               {o.name}
             </option>
           ))}
         </SelectField>
-        <TextField label="Region" placeholder="Optional" value={region} onChange={(e) => setRegion(e.target.value)} />
+        {regionOptions(country).length ? (
+          <SelectField label="Region" value={region} onChange={(e) => setRegion(e.target.value)}>
+            <option value="">All regions</option>
+            {regionOptions(country).map((r) => (
+              <option key={r} value={r}>
+                {r}
+              </option>
+            ))}
+          </SelectField>
+        ) : (
+          <TextField label="Region" placeholder="Optional" value={region} onChange={(e) => setRegion(e.target.value)} />
+        )}
       </div>
       <div className="mt-4" aria-live="polite">
         {!valid ? (
@@ -297,7 +342,7 @@ export default function TaxSettingsPage() {
   usePageMeta('Tax', [{ label: 'Settings' }]);
   return (
     <>
-      <PageHeader description="Tax rates applied to orders in this admin preview, by destination country and region." />
+      <PageHeader description={API_MODE ? 'Tax rates applied to orders, by destination country and region.' : 'Tax rates applied to orders in this admin preview, by destination country and region.'} />
       <Notice tone="warning" role="alert" title="Illustrative rules only" className="mb-4">
         These tax rules exist for the demo. They are <strong>not tax advice</strong> and do not make the store legally or tax compliant — confirm the real rules for every
         market with a qualified adviser.

@@ -1,9 +1,18 @@
 import type { Coupon, CouponInput, CouponState } from '@/types';
 import { apiClient } from './client';
 
-export async function fetchCoupons(signal?: AbortSignal): Promise<Array<Coupon & { state: CouponState }>> {
-  const { items } = await apiClient.get<{ items: Array<Coupon & { state: CouponState }> }>('/api/admin/coupons', { signal });
-  return items;
+export interface CouponList {
+  items: Array<Coupon & { state: CouponState }>;
+  total: number;
+  page: number;
+  pageSize: number;
+  pageCount: number;
+  stateCounts?: Record<string, number>;
+}
+
+/** M-O14: server pagination + search/state filter (was: whole list, client-filtered). */
+export async function fetchCoupons(params?: { q?: string; state?: string; page?: number; pageSize?: number }, signal?: AbortSignal): Promise<CouponList> {
+  return apiClient.get<CouponList>('/api/admin/coupons', { query: params, signal });
 }
 
 export function createCoupon(input: CouponInput): Promise<Coupon & { state: CouponState }> {

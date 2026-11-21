@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { Coupon, Order, ProductInput, ProductOption } from '@/types';
 import { couponState, evaluateCoupon, validateCoupon } from './couponRules';
-import { applyAdjustment, stockState } from './inventoryRules';
+import { MAX_STOCK_PER_VARIANT, applyAdjustment, reasonLabel, stockState } from './inventoryRules';
+import { regionOptions } from '../components/settings/countryNames';
 import { computeDashboard } from './metrics';
 import { convertFromUsd, formatMoney, toUsd } from './money';
 import { checkCancel, checkRefund, checkTransition, nextFulfilment, paymentAfterRefund, refundableAmount } from './orderRules';
-import { optionCombos, syncVariants, validateProduct } from './productRules';
+import { optionCombos, syncVariants, validateProduct, variantLabel } from './productRules';
 
 const L = (en: string, hi = '') => ({ en, hi });
 
@@ -76,6 +77,24 @@ describe('product rules: variants and SKUs', () => {
     expect(new Set(again.map((v) => v.sku)).size).toBe(4);
   });
 
+  it('keeps auto-SKUs unique when option values share their first 10 characters', () => {
+    const long: ProductOption = {
+      id: 'finish',
+      name: L('Finish'),
+      type: 'button',
+      values: [
+        { id: 'a', label: L('Handwoven kilim red'), swatch: null },
+        { id: 'b', label: L('Handwoven kilim blue'), swatch: null },
+      ],
+    };
+    const out = syncVariants([long], [], { price: 100, salePrice: null, skuPrefix: 'YS-LONGPREFIX', idPrefix: 't' });
+    expect(out).toHaveLength(2);
+    const skus = out.map((v) => v.sku);
+    expect(new Set(skus).size).toBe(2);
+    expect(skus.every((s) => /^[A-Z0-9][A-Z0-9-]{1,39}$/.test(s))).toBe(true);
+    expect(skus.every((s) => s.length <= 40)).toBe(true);
+  });
+
   it('accepts a valid product', () => {
     expect(validateProduct(baseProduct(), ctx())).toEqual([]);
   });
@@ -141,8 +160,46 @@ describe('inventory rules', () => {
     expect(applyAdjustment(5, 'add', 1.5)).toHaveProperty('error');
   });
 
+  // L-I5: the cap is one shared value with the backend (100,000 per variant).
+  it('caps stock at the shared per-variant maximum', () => {
+    expect(MAX_STOCK_PER_VARIANT).toBe(100_000);
+    expect(applyAdjustment(0, 'set', 100_000)).toEqual({ after: 100_000, delta: 100_000 });
+    expect(applyAdjustment(0, 'set', 100_001)).toHaveProperty('error');
+  });
+
   it('classifies stock against the threshold', () => {
     expect([stockState(0, 5), stockState(5, 5), stockState(6, 5)]).toEqual(['out', 'low', 'in']);
+  });
+
+  // L-I1: every adjustment reason — including return/exchange rows — renders a label.
+  it('labels every adjustment reason, never a raw snake_case code', () => {
+    expect(reasonLabel('return_received')).toBe('Return received — items restocked');
+    expect(reasonLabel('exchange_shipped')).toBe('Exchange shipped');
+    expect(reasonLabel('sale')).toBe('Sale — order placed');
+    expect(reasonLabel('order_cancelled')).toBe('Order cancelled — items restocked');
+  });
+});
+
+describe('variant labels (L-I7)', () => {
+  it('joins resolved option values and names unresolvable ones honestly', () => {
+    expect(variantLabel([color, size], { options: { color: 'sand', size: 'l' } })).toBe('Sand / Large');
+    expect(variantLabel([color, size], { options: { color: 'sand', size: 'gone' } })).toBe('Sand');
+    expect(variantLabel([color, size], { options: { color: 'gone', size: 'gone' } })).toBe('Variant options unavailable');
+    expect(variantLabel([], { options: {} })).toBeNull();
+  });
+
+  it('rejects stock above the shared cap when validating a product', () => {
+    const p = baseProduct({ variants: [{ id: 'v1', sku: 'YS-TEST', options: {}, price: 2800, salePrice: null, stock: 100_001, imageIds: [] }] });
+    expect(paths(validateProduct(p, ctx()))).toContain('variants.0.stock');
+  });
+});
+
+describe('tax region lists (L-S4)', () => {
+  it('offers states for US/IN and free text elsewhere', () => {
+    expect(regionOptions('US')).toContain('California');
+    expect(regionOptions('IN')).toContain('Rajasthan');
+    expect(regionOptions('DE')).toEqual([]);
+    expect(regionOptions('XX')).toEqual([]);
   });
 });
 
@@ -193,6 +250,7 @@ function order(over: Partial<Order> = {}): Order {
     subtotal: 240000, discount: 0, couponCode: null, shipping: 0, tax: 0, taxRate: 0, taxInclusive: false, total: 240000, refundedTotal: 0,
     shippingMethod: { id: 'standard', label: '', minDays: 1, maxDays: 2 },
     payment: { status: 'paid', method: 'card', reference: '' },
+    refunds: [],
     fulfilment: { status: 'unfulfilled', carrier: null, trackingNumber: null, trackingUrl: null, restocked: false },
     events: [], notes: [], ...over,
   };
