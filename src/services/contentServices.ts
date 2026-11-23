@@ -278,12 +278,19 @@ export const mediaService = {
   /** Without `force`, deleting an image that is still referenced fails with the list of usages. */
   async remove(id: string, force = false): Promise<{ detached: number }> {
     if (API_MODE) {
-      const res = await mediaApi.deleteMedia(id);
-      return { detached: res.detached ?? 0 };
+      try {
+        const res = await mediaApi.deleteMedia(id);
+        return { detached: res.detached ?? 0 };
+      } catch (err: any) {
+        if (err?.code === 'not_found' || err?.message?.toLowerCase().includes('not found')) {
+          return { detached: 0 };
+        }
+        throw err;
+      }
     }
     return mockRequest(() => {
       const m = db.media.find((x) => x.id === id);
-      if (!m) throw new ApiError('not_found', 'Image not found.');
+      if (!m) return { detached: 0 };
       const used = usagesOf(id);
       if (used.length && !force) throw new ApiError('in_use', 'This image is still used.', [], used);
       for (const p of db.products) {
