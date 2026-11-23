@@ -18,7 +18,16 @@ const schema = z.object({
 });
 type Values = z.infer<typeof schema>;
 
-const safeNext = (v: string | null) => (v && v.startsWith('/') && !v.startsWith('//') ? v : '/dashboard');
+const safeNext = (v: string | null) => {
+  if (!v) return '/dashboard';
+  let path = v;
+  if (path.startsWith('/admin/')) {
+    path = path.slice('/admin'.length);
+  } else if (path === '/admin') {
+    path = '/dashboard';
+  }
+  return path.startsWith('/') && !path.startsWith('//') ? path : '/dashboard';
+};
 
 export default function LoginPage() {
   usePageMeta('Sign in');

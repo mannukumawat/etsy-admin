@@ -41,7 +41,15 @@ const NotFoundPage = lazy(() => import('@/pages/NotFoundPage'));
 const NotificationsPage = lazy(() => import('@/pages/notifications/NotificationsPage'));
 const WalletDetailPage = lazy(() => import('@/pages/wallet/WalletDetailPage'));
 
-export const router = createBrowserRouter([
+const getBasename = () => {
+  if (typeof window !== 'undefined' && (window.location.pathname === '/admin' || window.location.pathname.startsWith('/admin/'))) {
+    return '/admin';
+  }
+  return '/';
+};
+
+export const router = createBrowserRouter(
+  [
   {
     element: <AuthLayout />,
     errorElement: <RouteError />,
@@ -99,4 +107,8 @@ export const router = createBrowserRouter([
       { path: '*', element: <NotFoundPage /> },
     ],
   },
-]);
+],
+{
+  basename: getBasename(),
+}
+);
