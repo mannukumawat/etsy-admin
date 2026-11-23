@@ -47,10 +47,13 @@ jobs:
           key: ${{ secrets.SSH_KEY }}
           port: 65002
           script: |
-            cat > /home/u323851671/domains/dignityartedgepvtltd.com/public_html/admin/.htaccess << 'EOF'
+            ADMIN_DIR="/home/u323851671/domains/dignityartedgepvtltd.com/public_html/admin"
+            mkdir -p "$ADMIN_DIR"
+            cat > "$ADMIN_DIR/.htaccess" << 'HTEOF'
             RewriteEngine On
             RewriteBase /admin/
             RewriteCond %{REQUEST_FILENAME} !-f
             RewriteCond %{REQUEST_FILENAME} !-d
             RewriteRule . /admin/index.html [L]
-            EOF
+            HTEOF
+            echo "Admin .htaccess created"
