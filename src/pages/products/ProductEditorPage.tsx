@@ -123,7 +123,7 @@ function toForm(p: Product): ProductForm {
 function fromForm(v: ProductForm): ProductInput {
   return {
     name: v.name, shortDescription: v.shortDescription, description: v.description, materials: v.materials, care: v.care,
-    slug: v.slug.trim(), categoryId: v.categoryId, itemGroupId: v.itemGroupId ?? null, navLinkId: v.navLinkId ?? null, collectionId: v.collectionId ?? null, barcode: v.barcode.trim() ? v.barcode.trim() : null, costPrice: v.costPrice === null ? null : toMinor(v.costPrice),
+    slug: v.slug.trim(), categoryId: v.categoryId, itemGroupId: v.itemGroupId?.trim() ? v.itemGroupId.trim() : null, navLinkId: v.navLinkId?.trim() ? v.navLinkId.trim() : null, collectionId: v.collectionId?.trim() ? v.collectionId.trim() : null, barcode: v.barcode.trim() ? v.barcode.trim() : null, costPrice: v.costPrice === null ? null : toMinor(v.costPrice),
     tags: v.tagsText.split(',').map((t) => t.trim()).filter(Boolean),
     basePrice: toMinor(v.basePrice), baseSalePrice: v.baseSalePrice === null ? null : toMinor(v.baseSalePrice),
     images: v.images, options: v.options,
