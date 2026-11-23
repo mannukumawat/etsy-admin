@@ -1,4 +1,4 @@
-import type { Localized, MediaAsset } from '@/types';
+import type { Localized, MediaAsset, MediaUsage } from '@/types';
 import { apiClient } from './client';
 import type { MediaListResponse, MediaUploadRequest } from './types';
 
@@ -17,6 +17,19 @@ export function uploadMedia(body: MediaUploadRequest): Promise<MediaAsset> {
 
 export function importMediaUrl(url: string, alt: Localized): Promise<MediaAsset> {
   return apiClient.post<MediaAsset>('/api/admin/media/from-url', { url, alt });
+}
+
+export function deleteMedia(id: string): Promise<{ ok: boolean; detached?: number }> {
+  return apiClient.delete<{ ok: boolean; detached?: number }>(`/api/admin/media/${id}`);
+}
+
+export async function fetchMediaUsages(id: string): Promise<MediaUsage[]> {
+  const { usages } = await apiClient.get<{ usages: MediaUsage[] }>(`/api/admin/media/${id}/usages`);
+  return usages;
+}
+
+export function updateMediaAlt(id: string, alt: Localized): Promise<MediaAsset> {
+  return apiClient.put<MediaAsset>(`/api/admin/media/${id}`, { alt });
 }
 
 /**

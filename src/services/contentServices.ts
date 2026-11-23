@@ -260,6 +260,7 @@ export const mediaService = {
   },
 
   updateAlt(id: string, alt: Localized): Promise<MediaAsset> {
+    if (API_MODE) return mediaApi.updateMediaAlt(id, alt);
     return mockRequest(() => {
       const m = db.media.find((x) => x.id === id);
       if (!m) throw new ApiError('not_found', 'Image not found.');
@@ -270,11 +271,16 @@ export const mediaService = {
   },
 
   usages(id: string): Promise<MediaUsage[]> {
+    if (API_MODE) return mediaApi.fetchMediaUsages(id);
     return mockRequest(() => usagesOf(id), [80, 200]);
   },
 
   /** Without `force`, deleting an image that is still referenced fails with the list of usages. */
-  remove(id: string, force = false): Promise<{ detached: number }> {
+  async remove(id: string, force = false): Promise<{ detached: number }> {
+    if (API_MODE) {
+      const res = await mediaApi.deleteMedia(id);
+      return { detached: res.detached ?? 0 };
+    }
     return mockRequest(() => {
       const m = db.media.find((x) => x.id === id);
       if (!m) throw new ApiError('not_found', 'Image not found.');

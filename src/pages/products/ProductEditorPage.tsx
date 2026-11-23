@@ -121,13 +121,20 @@ function toForm(p: Product): ProductForm {
 }
 
 function fromForm(v: ProductForm): ProductInput {
+  const survivingImageIds = new Set(v.images.map((img) => img.mediaId));
   return {
     name: v.name, shortDescription: v.shortDescription, description: v.description, materials: v.materials, care: v.care,
     slug: v.slug.trim(), categoryId: v.categoryId, itemGroupId: v.itemGroupId?.trim() ? v.itemGroupId.trim() : null, navLinkId: v.navLinkId?.trim() ? v.navLinkId.trim() : null, collectionId: v.collectionId?.trim() ? v.collectionId.trim() : null, barcode: v.barcode.trim() ? v.barcode.trim() : null, costPrice: v.costPrice === null ? null : toMinor(v.costPrice),
     tags: v.tagsText.split(',').map((t) => t.trim()).filter(Boolean),
     basePrice: toMinor(v.basePrice), baseSalePrice: v.baseSalePrice === null ? null : toMinor(v.baseSalePrice),
     images: v.images, options: v.options,
-    variants: v.variants.map(({ isNew: _n, ...x }) => ({ ...x, sku: x.sku.trim().toUpperCase(), price: toMinor(x.price), salePrice: x.salePrice === null ? null : toMinor(x.salePrice) })),
+    variants: v.variants.map(({ isNew: _n, ...x }) => ({
+      ...x,
+      sku: x.sku.trim().toUpperCase(),
+      price: toMinor(x.price),
+      salePrice: x.salePrice === null ? null : toMinor(x.salePrice),
+      imageIds: (x.imageIds || []).filter((id) => survivingImageIds.has(id)),
+    })),
     weight: v.weight, dimensions: v.dimensions, specs: v.specs,
     returnsAllowed: v.returnsAllowed, exchangeAllowed: v.exchangeAllowed, returnDays: v.returnDays,
     isFeatured: v.isFeatured, isBestseller: v.isBestseller, isNew: v.isNew, displayOrder: v.displayOrder, seo: v.seo,
@@ -173,7 +180,7 @@ function PricePreview({ usdMajor }: { usdMajor: number | null }) {
 const MAX_PRODUCT_IMAGES = 20;
 
 function ImagesSection() {
-  const { control } = useFormContext<ProductForm>();
+  const { control, getValues, setValue } = useFormContext<ProductForm>();
   const { fields, append, remove, move } = useFieldArray({ control, name: 'images', keyName: 'key' });
   const { map } = useMediaMap();
   const [picking, setPicking] = useState(false);
@@ -182,6 +189,22 @@ function ImagesSection() {
   const [urlError, setUrlError] = useState('');
   const variants = useWatch({ control, name: 'variants' });
   const atCap = fields.length >= MAX_PRODUCT_IMAGES;
+
+  const handleRemoveImage = (index: number) => {
+    const removedMediaId = fields[index]?.mediaId;
+    remove(index);
+    if (removedMediaId) {
+      const curVariants = getValues('variants') || [];
+      setValue(
+        'variants',
+        curVariants.map((v) => ({
+          ...v,
+          imageIds: (v.imageIds || []).filter((id) => id !== removedMediaId),
+        })),
+        { shouldDirty: true }
+      );
+    }
+  };
 
   const addImages = (ids: string[]) => {
     const existing = new Set(fields.map((f) => f.mediaId));
@@ -277,7 +300,7 @@ function ImagesSection() {
                   <IconButton size="sm" label={`Move image ${i + 1} down`} disabled={i === fields.length - 1} onClick={() => move(i, i + 1)}>
                     <ArrowDown className="h-4 w-4" aria-hidden />
                   </IconButton>
-                  <IconButton size="sm" label={`Remove image ${i + 1}`} onClick={() => remove(i)}>
+                  <IconButton size="sm" label={`Remove image ${i + 1}`} onClick={() => handleRemoveImage(i)}>
                     <Trash2 className="h-4 w-4 text-red-700" aria-hidden />
                   </IconButton>
                 </div>
