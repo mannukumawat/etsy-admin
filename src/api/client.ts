@@ -37,6 +37,21 @@ let onUnauthorized: UnauthorizedHandler | null = null;
 let handlingUnauthorized = false;
 let sessionCsrfToken: string | null = null;
 
+const ADMIN_TOKEN_KEY = 'ys_admin_token';
+let sessionAdminToken: string | null = typeof localStorage !== 'undefined' ? localStorage.getItem(ADMIN_TOKEN_KEY) : null;
+
+export function setAdminToken(token: string | null) {
+  sessionAdminToken = token;
+  if (typeof localStorage !== 'undefined') {
+    if (token) localStorage.setItem(ADMIN_TOKEN_KEY, token);
+    else localStorage.removeItem(ADMIN_TOKEN_KEY);
+  }
+}
+
+export function getAdminToken(): string | null {
+  return sessionAdminToken || (typeof localStorage !== 'undefined' ? localStorage.getItem(ADMIN_TOKEN_KEY) : null);
+}
+
 export function setCsrfToken(token: string | null) {
   sessionCsrfToken = token;
 }
@@ -50,6 +65,7 @@ export function setUnauthorizedHandler(handler: UnauthorizedHandler | null) {
 }
 
 function handleUnauthorized() {
+  setAdminToken(null);
   if (!onUnauthorized || handlingUnauthorized) return;
   handlingUnauthorized = true;
   try {
@@ -97,6 +113,7 @@ async function request<T>(method: string, path: string, options: RequestOptions 
   // The backend double-submits this cookie as a header on every mutating request from a signed-in
   // owner session (see backend/src/csrf.ts) — a no-op before login has issued the csrf cookie.
   const csrfToken = MUTATING_METHODS.has(method) ? (sessionCsrfToken ?? readCookie(CSRF_COOKIE)) : null;
+  const adminToken = getAdminToken();
 
   let response: Response;
   try {
@@ -109,6 +126,7 @@ async function request<T>(method: string, path: string, options: RequestOptions 
         // Deliberately NOT set for FormData: the browser must add its own multipart boundary.
         ...(body !== undefined && !isForm ? { 'Content-Type': 'application/json' } : {}),
         ...(csrfToken ? { 'x-csrf-token': csrfToken } : {}),
+        ...(adminToken ? { Authorization: `Bearer ${adminToken}` } : {}),
       },
       body: body === undefined ? undefined : isForm ? (body as FormData) : JSON.stringify(body),
       signal: controller.signal,
