@@ -58,6 +58,7 @@ export const categoryService = {
 
   /** Deleting a category that still has products requires a reassignment target. */
   remove(id: string, reassignTo?: string): Promise<{ moved: number }> {
+    if (API_MODE) return categoriesApi.deleteCategory(id, reassignTo);
     return mockRequest(() => {
       const cat = db.categories.find((c) => c.id === id);
       if (!cat) throw new ApiError('not_found', 'Category not found.');

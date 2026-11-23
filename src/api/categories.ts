@@ -15,3 +15,9 @@ export function createCategory(input: CategoryInput): Promise<CategoryWithCount>
 export function updateCategory(id: string, input: CategoryInput): Promise<CategoryWithCount> {
   return apiClient.put<CategoryWithCount>(`/api/admin/categories/${encodeURIComponent(id)}`, input);
 }
+
+export function deleteCategory(id: string, reassignTo?: string): Promise<{ moved: number }> {
+  return apiClient.delete<{ moved: number }>(`/api/admin/categories/${encodeURIComponent(id)}`, {
+    query: reassignTo ? { reassignTo } : undefined,
+  });
+}
