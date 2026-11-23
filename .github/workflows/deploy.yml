@@ -1,0 +1,56 @@
+name: Deploy Admin to Hostinger
+
+on:
+  push:
+    branches: [master]
+
+jobs:
+  deploy:
+    name: Build & Deploy Admin
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+        env:
+          VITE_API_URL: https://api.dignityartedgepvtltd.com
+
+      - name: Deploy to Hostinger via SSH
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.HOST }}
+          username: ${{ secrets.USERNAME }}
+          key: ${{ secrets.SSH_KEY }}
+          port: 65002
+          source: "dist/*"
+          target: "/home/u323851671/domains/dignityartedgepvtltd.com/public_html/admin/"
+          strip_components: 1
+          rm: true
+
+      - name: Setup SPA routing for admin
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.HOST }}
+          username: ${{ secrets.USERNAME }}
+          key: ${{ secrets.SSH_KEY }}
+          port: 65002
+          script: |
+            cat > /home/u323851671/domains/dignityartedgepvtltd.com/public_html/admin/.htaccess << 'EOF'
+            RewriteEngine On
+            RewriteBase /admin/
+            RewriteCond %{REQUEST_FILENAME} !-f
+            RewriteCond %{REQUEST_FILENAME} !-d
+            RewriteRule . /admin/index.html [L]
+            EOF
